@@ -1,0 +1,62 @@
+# Sample project: a 30m x 20m rectangular site facing a 6m road on the
+# south side, with an adjacent-site boundary to the east and a true-north
+# boundary to the north. Edit the values below to match your real site.
+site:
+  # polygon vertices, counter-clockwise, in meters (+X = east, +Y = true north)
+  points:
+    - [0, 0]
+    - [30, 0]
+    - [30, 20]
+    - [0, 20]
+  # one entry per edge; edges[i] is the edge from points[i] to points[i+1]
+  edges:
+    - kind: road          # points[0]->points[1]: south side, facing the road
+      road_width_m: 6.0
+      setback_m: 0.0
+    - kind: adjacent       # points[1]->points[2]: east side, neighboring lot
+      setback_m: 0.0
+    - kind: north          # points[2]->points[3]: north side (true north)
+      setback_m: 0.0
+    - kind: adjacent       # points[3]->points[0]: west side, neighboring lot
+      setback_m: 0.0
+  zoning:
+    zone_type: 1res        # see jwcad_volume/zoning.py for the full list
+    far_ratio: 2.0          # 容積率 200%
+    coverage_ratio: 0.6     # 建蔽率 60%
+    absolute_height_limit_m: null
+
+envelope:
+  # These give a quick (a few seconds) first look. The sky-ratio tower
+  # search cost scales roughly with n_layers * (1/interval_m) * n_azimuth *
+  # len(split_fractions) * search_iterations -- raise these (e.g. n_layers:
+  # 30, interval_m: 2.0, n_azimuth: 180, search_iterations: 24) for a more
+  # precise final check once the site/zoning parameters are settled; expect
+  # that to take from tens of seconds up to a few minutes depending on site
+  # size and the number of regulated edges.
+  n_layers: 10
+  interval_m: 4.0
+  n_azimuth: 45
+  use_sky_ratio: true
+  split_fractions: [0.3, 0.5, 0.7]
+  search_iterations: 12
+
+# Omit this whole section to skip the shadow-regulation check entirely.
+# There is no universal default for line1/line2 hour limits -- look them up
+# in your local ordinance's 別表第四 for the applicable zone.
+shadow:
+  measurement_month: 12
+  measurement_day: 22
+  start_hour: 8.0
+  end_hour: 16.0
+  time_step_minutes: 10.0
+  measurement_height_m: 4.0
+  latitude_deg: 35.7
+  line1_distance_m: 5.0
+  line1_max_hours: 5.0
+  line2_distance_m: 10.0
+  line2_max_hours: 3.0
+
+output:
+  dxf_path: envelope.dxf
+  # gaihen_text_path: envelope_gaihen.txt  # experimental, see docs/jww_integration.md
+  section_axis: y

@@ -1,0 +1,27 @@
+[project]
+name = "jwcad-volume"
+version = "0.1.0"
+description = "JW-CAD external transformation (gaihen) program: legal max building volume via slant-line / sky-ratio (tenkuritsu) / shadow regulation analysis"
+requires-python = ">=3.9"
+dependencies = [
+    "shapely>=2.0",
+    "ezdxf>=1.1",
+    "numpy>=1.24",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+jwcad-volume = "jwcad_volume.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["jwcad_volume*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
