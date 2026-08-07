@@ -33,6 +33,9 @@ class EnvelopeSettings:
     split_fractions: tuple[float, ...] = (0.3, 0.5, 0.7)
     search_iterations: int = 12
     use_sky_ratio: bool = True
+    # タワーの多段セットバック探索（envelope.py の同名定数と対応）
+    stage_insets_m: tuple[float, ...] = (0.0, 3.0, 6.0)
+    max_stages: int = 2
 
 
 @dataclass
@@ -68,8 +71,9 @@ def _build_site(data: dict) -> Site:
 def build_envelope_settings(data: dict | None) -> EnvelopeSettings:
     data = data or {}
     kwargs = dict(data)
-    if "split_fractions" in kwargs:
-        kwargs["split_fractions"] = tuple(kwargs["split_fractions"])
+    for key in ("split_fractions", "stage_insets_m"):
+        if key in kwargs:
+            kwargs[key] = tuple(kwargs[key])
     return EnvelopeSettings(**kwargs)
 
 

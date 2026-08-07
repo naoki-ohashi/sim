@@ -29,26 +29,16 @@ if errorlevel 1 goto :failed
 
 echo.
 echo [2/4] 外部変形本体をビルドします...
-python -m PyInstaller --noconfirm --onefile --console ^
-    --name jwcad_volume_gaihen ^
-    --collect-all shapely ^
-    --collect-all ezdxf ^
-    --distpath dist\jww ^
-    --workpath build\gaihen ^
-    --specpath build ^
-    jwcad_volume\gaihen.py
+python -m PyInstaller --noconfirm ^
+    --distpath dist\jww --workpath build\gaihen ^
+    packaging\jwcad_volume_gaihen.spec
 if errorlevel 1 goto :failed
 
 echo.
 echo [3/4] コマンド版をビルドします...
-python -m PyInstaller --noconfirm --onefile --console ^
-    --name jwcad-volume ^
-    --collect-all shapely ^
-    --collect-all ezdxf ^
-    --distpath dist\jww ^
-    --workpath build\cli ^
-    --specpath build ^
-    jwcad_volume\cli.py
+python -m PyInstaller --noconfirm ^
+    --distpath dist\jww --workpath build\cli ^
+    packaging\jwcad_volume_cli.spec
 if errorlevel 1 goto :failed
 
 echo.

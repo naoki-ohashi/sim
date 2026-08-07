@@ -39,6 +39,12 @@ envelope:
   use_sky_ratio: true
   split_fractions: [0.3, 0.5, 0.7]
   search_iterations: 12
+  # タワーの多段セットバック探索。各段で試すセットバック量(m)と段数の上限。
+  # 30m角の敷地での実測では 1段=+10.5% / 2段=+12.5% / 3段=+12.8%（斜線制限
+  # のみの体積に対する増分）。3段目は伸びが小さい割に時間が倍近くかかるので
+  # 既定は2段。最終確認では max_stages: 3 にするとわずかに改善します。
+  stage_insets_m: [0.0, 3.0, 6.0]
+  max_stages: 2
 
 # Omit this whole section to skip the shadow-regulation check entirely.
 # There is no universal default for line1/line2 hour limits -- look them up

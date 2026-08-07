@@ -181,6 +181,8 @@ def run(temp_path: str, params_path: str) -> str:
         measurement_height=env.measurement_height,
         split_fractions=env.split_fractions,
         search_iterations=env.search_iterations,
+        stage_insets_m=env.stage_insets_m,
+        max_stages=env.max_stages,
         use_sky_ratio=env.use_sky_ratio,
         shadow_params=params.shadow,
     )
