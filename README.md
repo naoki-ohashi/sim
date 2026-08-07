@@ -1,3 +1,22 @@
+# MVE / jwcad-volume
+
+このリポジトリには2つのパッケージがあります。
+
+| | 用途 | 状態 |
+|---|---|---|
+| **`mve/`** | 日影規制・斜線制限をふまえた最大容積の計算エンジン | **現行**。日影対応をボクセル法で作り直し、複数前面道路・各種緩和・真北・測定面選択に対応 |
+| `jwcad_volume/` | JW-CAD外部変形連携（JWC形式・バッチ・exe化） | 実績があるため維持。計算エンジンとしてはMVEが後継 |
+
+**MVEの使い方は [`docs/mve/README.md`](docs/mve/README.md) を参照してください。**
+
+```bash
+mve examples/mve_sample.yaml
+```
+
+以下は `jwcad_volume` の説明です。
+
+---
+
 # jwcad-volume
 
 JW-CAD（JWW）向けの外部変形プログラム：**道路斜線制限・隣地斜線制限・北側斜線

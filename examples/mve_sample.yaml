@@ -1,0 +1,87 @@
+# MVE 設定ファイルの例
+#
+# 30m x 20m の敷地。南に6m道路、東西が隣地、北は水路（幅4m）に接する想定。
+# 数値はすべて例です。実際の敷地では都市計画図と自治体の条例で確認してください。
+
+site:
+  name: サンプル敷地
+
+  # --- 敷地の形（points / rectangle / dxf のいずれか）-----------------
+  # 頂点は反時計回り。単位はm。+X=図面の右、+Y=図面の上。
+  points:
+    - [0, 0]
+    - [30, 0]
+    - [30, 20]
+    - [0, 20]
+
+  # 長方形で指定する場合:
+  # rectangle:
+  #   width_m: 30      # 間口（X方向）
+  #   depth_m: 20      # 奥行（Y方向）
+
+  # DXFの敷地図を読み込む場合:
+  # dxf:
+  #   path: 敷地図.dxf
+  #   layer: 敷地          # 省略すると全レイヤから探す
+  #   units_per_meter: 1   # mmで作図しているなら 1000
+  #   default_road_width_m: 6
+
+  # --- 真北 -----------------------------------------------------------
+  # 真北が図面の上(+Y)からどれだけ反時計回りにずれているか（度）。
+  # 0 なら図面の上が真北。北側斜線と日影計算はこの向きを基準にします。
+  north_angle_deg: 0
+
+  # --- 壁面後退距離（全辺の既定値）------------------------------------
+  # 建物を境界線から下げる距離。斜線制限の後退緩和と天空率の両方に効きます。
+  # 辺ごとに変えたい場合は edges の中で個別に指定してください。
+  wall_setback_m: 1.0
+
+  # --- 各辺の境界種別（頂点の順番に対応）------------------------------
+  edges:
+    - kind: road            # 南側: 前面道路
+      road_width_m: 6.0
+      wall_setback_m: 1.5   # この辺だけ後退距離を変える例
+    - kind: adjacent        # 東側: 隣地
+    - kind: adjacent        # 北側: 隣地だが水路に接する
+      relaxation:
+        kind: water         # park（公園・広場）/ water（水面）/ railway（線路敷）
+        width_m: 4.0
+      # 敷地の地盤面が隣地より低い場合の高低差（1m以上で緩和が効きます）
+      # ground_level_diff_m: 0
+    - kind: adjacent        # 西側: 隣地
+
+  # --- 用途地域など ---------------------------------------------------
+  zoning:
+    zone_type: 1res         # 選択肢は mve/zoning.py の ZONE_LABELS_JA を参照
+    far_ratio: 200          # 容積率(%)。比(2.0)で書いてもOK
+    coverage_ratio: 60      # 建蔽率(%)
+    # absolute_height_limit_m: 10   # 低層住居専用等の絶対高さ制限
+
+  floor_height_m: 3.2
+
+# --- メッシュ（ボクセルの割り付け）------------------------------------
+mesh:
+  cell_size_x_m: 3.0        # X方向の幅
+  cell_size_y_m: 3.0        # Y方向の幅
+  mesh_angle_deg: 0         # 道路に平行に割り付けたい場合などに回転
+  coverage_threshold: 0.5   # マスの何割が外郭線に入っていれば採用するか
+  use_sky_ratio: false      # true にすると斜線制限を外して天空率で判定する前提になる
+
+# --- 日影規制 ----------------------------------------------------------
+# このセクションを消すと日影のチェックを省略します。
+# 測定面と規制時間は条例で決まります。必ず確認してください。
+shadow:
+  measurement_height_m: 4.0   # 1.5 / 4.0 / 6.5 のいずれか
+  line_5m_max_hours: 5.0      # 5m超10m以内の規制時間
+  line_10m_max_hours: 3.0     # 10m超の規制時間
+  latitude_deg: 35.7
+  hokkaido: false             # true なら真太陽時9時〜15時
+  time_step_minutes: 10.0
+  sample_interval_m: 2.0
+  apply_deemed_boundary: true # 令135条の12第3項のみなし境界線を使う
+
+output:
+  dxf_path: mve_result.dxf
+  html_path: mve_result.html
+  draw_mesh: true
+  draw_floor_labels: true
