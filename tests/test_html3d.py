@@ -24,7 +24,7 @@ def _result():
 
 
 def _embedded_data(html: str) -> dict:
-    match = re.search(r"const DATA = (\{.*?\});\n", html, re.S)
+    match = re.search(r"JwcadVolumeViewer\.init\((\{.*\})\);\n", html)
     assert match, "埋め込みJSONが見つからない"
     return json.loads(match.group(1))
 

@@ -19,15 +19,29 @@ JW-CAD（JWW）向けの外部変形プログラム：**道路斜線制限・隣
 - JW-CAD/JWWへ読み込み可能なDXFファイル（平面・断面・アイソメ・サマリー付き）を出力
 - **ブラウザで回して見られる3Dビューア**（単一HTML・外部ライブラリなし）を出力
 
-## 使い方は2通り
+## 使い方は3通り
 
-| | A. コマンド実行 → DXFをJWWで開く | B. JWWの外部変形として使う |
-|---|---|---|
-| 手軽さ | ◎ すぐ試せる | △ exeビルドが必要 |
-| 確実性 | ◎ DXF読込はJWWの標準機能 | △ 外部変形の書式は実機未検証 |
-| 操作感 | 敷地条件をYAMLに書く | JWW上で敷地を選んで実行 |
+| | Web版（ブラウザだけ） | A. コマンド実行 → DXFをJWWで開く | B. JWWの外部変形として使う |
+|---|---|---|---|
+| 必要なもの | ブラウザのみ | Python | exeビルド（Python不要な配布可） |
+| 手軽さ | ◎ 入力してすぐ結果 | ○ すぐ試せる | △ ビルドが必要 |
+| 確実性 | ◎ | ◎ DXF読込はJWWの標準機能 | △ 外部変形の書式は実機未検証 |
+| 出力 | 画面の3D / 設定YAML / 3D HTML | DXF・3D HTML | 図面に直接作図 |
+
+Web版で条件を詰めて設定YAMLを保存し、Python版でDXFやJWWに出す、という
+使い分けができます（`docs/web_app.md`）。
 
 **Windowsでの導入手順は `docs/windows_setup.md` に詳しくまとめてあります。**
+
+## Web版をすぐ試す
+
+```bash
+python3 tools/build_web.py     # dist/jwcad-volume-web.html ができます
+```
+
+出来たHTMLをダブルクリックするだけです。通信は一切せず、外部ライブラリも
+CDNも使っていません。計算エンジンはPython版の移植で、**同じ入力なら同じ
+結果になることを自動テストで担保**しています（`tests/test_js_parity.py`）。
 
 ## インストール
 
@@ -128,8 +142,17 @@ jwcad_volume/
   config.py                    # YAML設定ファイルの読み込み
   cli.py                       # コマンドラインエントリポイント
 tests/                          # pytest一式(法令根拠の基準値検証を含む)
+web/                            # Web版(ブラウザだけで動く)
+  index.html                    # 画面
+  engine.js                     # 斜線制限・天空率・日影の計算(Python版の移植)
+  envelope.js                   # 最大ボリューム探索(Python版の移植)
+  viewer.js                     # 3D描画(Python版の出力と共通)
+  app.js                        # 画面とエンジンの接続
+tools/build_web.py              # Web版を単一HTMLにまとめる
+packaging/                      # PyInstallerのspecと起動スクリプト
 docs/
   windows_setup.md              # Windows導入手順(A/B両方)
+  web_app.md                    # Web版の使い方とPython版との一致検証
   3d_view.md                    # 3D確認の方法(ブラウザ/アイソメ図)
   disclaimer.md                # 免責事項・本ツールの限界
   legal_basis.md                # 各計算の法的根拠まとめ

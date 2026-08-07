@@ -16,6 +16,9 @@ for package in ("shapely", "ezdxf", "yaml"):
     binaries += pkg_binaries
     hiddenimports += pkg_hidden
 
+# 3Dビューアの描画コードは実行時に読み込むので同梱する
+datas += [("../web/viewer.js", "web")]
+
 a = Analysis(
     ["entry_gaihen.py"],
     pathex=[".."],

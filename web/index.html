@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jwcad-volume Web版 — 最大ボリューム検討</title>
+<style>
+  :root {
+    --bg: #f2f4f7; --panel: #ffffff; --text: #1b1f24; --muted: #5c6673;
+    --border: #d6dbe3; --accent: #2f6fd0; --field: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171c; --panel: #1d2127; --text: #e8ebef; --muted: #9aa4b2;
+      --border: #2f3540; --accent: #6ea8fe; --field: #14171c;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg); color: var(--text); overflow: hidden;
+    font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo, system-ui, sans-serif;
+    font-size: 13px;
+  }
+  #app { display: flex; height: 100%; }
+  #form {
+    width: 330px; flex: none; overflow-y: auto; padding: 16px;
+    background: var(--panel); border-right: 1px solid var(--border);
+  }
+  #stage { position: relative; flex: 1; min-width: 0; }
+  canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+  canvas.dragging { cursor: grabbing; }
+
+  h1 { font-size: 15px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 12px; margin: 0 0 14px; line-height: 1.6; }
+  fieldset { border: 1px solid var(--border); border-radius: 8px; margin: 0 0 12px; padding: 10px 12px; }
+  legend { font-weight: 600; padding: 0 4px; font-size: 12px; }
+  .row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+  .row label { flex: 1; color: var(--muted); }
+  input[type=number], input[type=text], select {
+    width: 110px; flex: none; font: inherit; padding: 4px 6px;
+    color: var(--text); background: var(--field);
+    border: 1px solid var(--border); border-radius: 5px;
+  }
+  select { width: 150px; }
+  textarea {
+    width: 100%; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px;
+    color: var(--text); background: var(--field);
+    border: 1px solid var(--border); border-radius: 5px; padding: 6px;
+  }
+  button {
+    font: inherit; padding: 6px 12px; cursor: pointer; border-radius: 6px;
+    color: var(--text); background: transparent; border: 1px solid var(--border);
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  #run { width: 100%; padding: 9px; font-weight: 600; border-color: var(--accent); color: var(--accent); }
+  .btnrow { display: flex; flex-wrap: wrap; gap: 6px; }
+  .note { color: var(--muted); font-size: 11px; line-height: 1.6; margin-top: 6px; }
+  .edge-kinds { display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; align-items: center; }
+
+  .panel {
+    position: absolute; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px 14px; line-height: 1.7;
+    box-shadow: 0 4px 16px rgba(0,0,0,.12);
+  }
+  #controls { top: 14px; left: 14px; max-width: 250px; }
+  #summary { bottom: 14px; left: 14px; max-width: 300px; max-height: 48vh; overflow: auto; font-size: 12px; }
+  #summary summary { cursor: pointer; font-weight: 600; }
+  #summary div { color: var(--muted); }
+  /* コンパス（右上）と重ならないよう右下に置く */
+  #status { bottom: 14px; right: 14px; color: var(--muted); font-size: 12px; }
+  #controls label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+  .swatch { width: 13px; height: 13px; border-radius: 3px; border: 1px solid rgba(0,0,0,.25); flex: none; }
+  .views { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .views button { font-size: 12px; padding: 4px 9px; }
+  h2 { margin: 0 0 8px; font-size: 12px; letter-spacing: .04em; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="form">
+    <h1>最大ボリューム検討</h1>
+    <p class="sub">
+      斜線制限（天空率による割増を含む）と日影規制をふまえた最大ボリュームを
+      ブラウザ内で計算します。通信は一切しません。
+    </p>
+
+    <fieldset>
+      <legend>敷地</legend>
+      <div class="row">
+        <label>形状の指定</label>
+        <select id="shape-mode">
+          <option value="rect">長方形</option>
+          <option value="poly">座標を入力</option>
+        </select>
+      </div>
+      <div id="rect-inputs">
+        <div class="row"><label>間口（東西, m）</label><input type="number" id="width" value="30" min="1" step="0.5"></div>
+        <div class="row"><label>奥行（南北, m）</label><input type="number" id="depth" value="20" min="1" step="0.5"></div>
+      </div>
+      <div id="poly-inputs" style="display:none">
+        <textarea id="poly-points" rows="5">0,0
+30,0
+30,20
+0,20</textarea>
+        <p class="note">1行に「X,Y」（m単位、+X=東 / +Y=真北）。反時計回りに入力してください。</p>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>各辺の境界種別</legend>
+      <div class="edge-kinds" id="edge-kinds"></div>
+      <p class="note">辺の順番は入力した頂点の順（1番＝1点目から2点目）です。北側斜線は住居専用地域などでのみ効きます。</p>
+      <div class="row"><label>前面道路の幅員（m）</label><input type="number" id="road-width" value="6" min="0" step="0.5"></div>
+      <div class="row"><label>境界からの後退（m）</label><input type="number" id="setback" value="0" min="0" step="0.5"></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>用途地域など</legend>
+      <div class="row">
+        <label>用途地域</label>
+        <select id="zone">
+          <option value="1low">第一種低層住居専用</option>
+          <option value="2low">第二種低層住居専用</option>
+          <option value="denen">田園住居</option>
+          <option value="1mid">第一種中高層住居専用</option>
+          <option value="2mid">第二種中高層住居専用</option>
+          <option value="1res" selected>第一種住居</option>
+          <option value="2res">第二種住居</option>
+          <option value="quasi_res">準住居</option>
+          <option value="neighbor_commercial">近隣商業</option>
+          <option value="commercial">商業</option>
+          <option value="quasi_industrial">準工業</option>
+          <option value="industrial">工業</option>
+          <option value="industrial_exclusive">工業専用</option>
+          <option value="unspecified">指定なし</option>
+        </select>
+      </div>
+      <div class="row"><label>容積率（%）</label><input type="number" id="far" value="200" min="1" step="10"></div>
+      <div class="row"><label>建蔽率（%）</label><input type="number" id="coverage" value="60" min="1" max="100" step="5"></div>
+      <div class="row"><label>絶対高さ制限（m）</label><input type="number" id="abs-height" placeholder="なし" step="1"></div>
+      <div class="row"><label>階高（m）</label><input type="number" id="floor-height" value="3.2" min="1" step="0.1"></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>日影規制</legend>
+      <div class="row"><label>チェックする</label><input type="checkbox" id="shadow-on" checked style="width:auto"></div>
+      <div id="shadow-inputs">
+        <div class="row"><label>緯度（度）</label><input type="number" id="lat" value="35.7" step="0.1"></div>
+        <div class="row"><label>第1種 距離/時間</label>
+          <span><input type="number" id="l1d" value="5" step="0.5" style="width:48px">m
+                <input type="number" id="l1h" value="5" step="0.5" style="width:48px">h</span></div>
+        <div class="row"><label>第2種 距離/時間</label>
+          <span><input type="number" id="l2d" value="10" step="0.5" style="width:48px">m
+                <input type="number" id="l2h" value="3" step="0.5" style="width:48px">h</span></div>
+        <p class="note">時間数・距離は必ず適用される自治体の条例（別表第四相当）を確認してください。既定値は説明用の一例です。</p>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>計算精度</legend>
+      <div class="row">
+        <label>プリセット</label>
+        <select id="precision">
+          <option value="fast" selected>速い（数秒）</option>
+          <option value="normal">標準</option>
+          <option value="fine">精密（時間がかかります）</option>
+        </select>
+      </div>
+      <div class="row"><label>天空率を使う</label><input type="checkbox" id="use-sky" checked style="width:auto"></div>
+      <div class="row"><label>タワーの最大段数</label><input type="number" id="max-stages" value="2" min="1" max="4"></div>
+    </fieldset>
+
+    <button id="run">計算する</button>
+
+    <fieldset style="margin-top:12px">
+      <legend>書き出し・読み込み</legend>
+      <div class="btnrow">
+        <button id="export-yaml">設定YAMLを保存</button>
+        <button id="import-yaml">設定YAMLを読み込み</button>
+        <button id="export-html">3D HTMLを保存</button>
+      </div>
+      <input type="file" id="file-input" accept=".yaml,.yml" style="display:none">
+      <p class="note">
+        保存したYAMLはPython版の <code>jwcad-volume</code> にそのまま渡せます。
+        DXFやJWW外部変形への出力はPython版で行ってください。
+      </p>
+    </fieldset>
+
+    <p class="note">
+      設計初期段階の検討用です。確認申請には使えません。詳細はリポジトリの
+      docs/disclaimer.md を参照してください。
+    </p>
+  </div>
+
+  <div id="stage">
+    <canvas id="c"></canvas>
+    <div class="panel" id="controls">
+      <h2>表示</h2>
+      <label><input type="checkbox" id="t-final" checked>
+        <span class="swatch" style="background:#c98b4b"></span>最大ボリューム</label>
+      <label><input type="checkbox" id="t-base" checked>
+        <span class="swatch" style="background:#6ea8fe"></span>斜線制限エンベロープ</label>
+      <label><input type="checkbox" id="t-site" checked>
+        <span class="swatch" style="background:#888"></span>敷地・地盤</label>
+      <div class="views">
+        <button data-az="225" data-el="30">南西</button>
+        <button data-az="135" data-el="30">南東</button>
+        <button data-az="180" data-el="10">南から</button>
+        <button data-az="180" data-el="90">真上</button>
+        <button id="reset">リセット</button>
+      </div>
+    </div>
+    <details class="panel" id="summary" open><summary>計算結果</summary><div id="summary-body"></div></details>
+    <div class="panel" id="status">「計算する」を押してください</div>
+  </div>
+</div>
+
+<script src="engine.js"></script>
+<script src="envelope.js"></script>
+<script src="viewer.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
