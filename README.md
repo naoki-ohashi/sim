@@ -9,6 +9,14 @@
 
 **MVEの使い方は [`docs/mve/README.md`](docs/mve/README.md) を参照してください。**
 
+インストール不要のブラウザ版UIがあります（推奨）。
+
+```bash
+python3 tools/build_mve_web.py     # dist/MVE敷地入力.html をダブルクリック
+```
+
+コマンド版（DXF図面が必要な場合）:
+
 ```bash
 mve examples/mve_sample.yaml
 ```

@@ -1,0 +1,260 @@
+"""JavaScript版のMVEエンジンがPython版と同じ答えを出すことの検証。
+
+Web版UI（web/mve/）はPython版の移植なので、両方が同じ入力で同じ結果に
+なっていないと信用できません。実際にNode.jsでJS版を走らせて突き合わせます。
+"""
+import json
+import math
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from mve.far import compute_far
+from mve.mesh import assign_height_limits, build_mesh
+from mve.north import NorthReference
+from mve.optimizer import OptimizeOptions, optimize
+from mve.regulations import road_slant
+from mve.regulations.height_field import height_limit_at
+from mve.regulations.shadow import ShadowRegulationSpec, deemed_boundary_offsets
+from mve.site import Site
+from mve.solar import day_of_year, solar_declination_deg, solar_position_deg
+from mve.zoning import ZoningParams
+
+RUNNER = Path(__file__).parent / "js_runner.js"
+pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="Node.js が無い環境ではスキップ")
+
+SQUARE = [(0.0, 0.0), (30.0, 0.0), (30.0, 20.0), (0.0, 20.0)]
+
+
+def _site(specs=None, zone="1res", far=2.0, coverage=0.6, north=0.0, setback=0.0):
+    if specs is None:
+        specs = [
+            {"kind": "road", "road_width_m": 6.0, "wall_setback_m": setback},
+            {"kind": "adjacent", "wall_setback_m": setback},
+            {"kind": "adjacent", "wall_setback_m": setback},
+            {"kind": "adjacent", "wall_setback_m": setback},
+        ]
+    return Site.from_rings(
+        SQUARE, specs, ZoningParams(zone, far, coverage),
+        north=NorthReference(north_angle_deg=north))
+
+
+def _js_site(site):
+    return {
+        "points": [list(p) for p in site.points],
+        "edges": [
+            {
+                "p1": list(e.p1), "p2": list(e.p2), "kind": e.kind.value,
+                "roadWidthM": e.road_width_m, "wallSetbackM": e.wall_setback_m,
+                "groundLevelDiffM": e.ground_level_diff_m,
+                "relaxation": {"kind": e.relaxation.kind.value, "widthM": e.relaxation.width_m},
+            }
+            for e in site.edges
+        ],
+        "zoning": {
+            "zoneType": site.zoning.zone_type, "farRatio": site.zoning.far_ratio,
+            "coverageRatio": site.zoning.coverage_ratio,
+            "absoluteHeightLimitM": site.zoning.absolute_height_limit_m,
+        },
+        "northAngleDeg": site.north.north_angle_deg,
+        "floorHeightM": site.floor_height_m,
+    }
+
+
+def _js_shadow(spec: ShadowRegulationSpec) -> dict:
+    return {
+        "measurementHeightM": spec.measurement_height_m,
+        "line5mMaxHours": spec.line_5m_max_hours,
+        "line10mMaxHours": spec.line_10m_max_hours,
+        "latitudeDeg": spec.latitude_deg, "hokkaido": spec.hokkaido,
+        "timeStepMinutes": spec.time_step_minutes,
+        "sampleIntervalM": spec.sample_interval_m,
+        "applyDeemedBoundary": spec.apply_deemed_boundary,
+    }
+
+
+def _run_js(payload):
+    result = subprocess.run(["node", str(RUNNER)], input=json.dumps(payload),
+                            capture_output=True, text=True, timeout=600)
+    if result.returncode != 0:
+        raise AssertionError(f"JS実行に失敗:\n{result.stderr}")
+    return json.loads(result.stdout)
+
+
+# === 太陽位置 =========================================================
+
+def test_solar_position_matches():
+    cases = [{"lat": 35.7, "month": 12, "day": 22, "hour": h} for h in (8.0, 10.0, 12.0, 15.0)]
+    cases.append({"lat": 43.1, "month": 12, "day": 22, "hour": 9.0})
+    js = _run_js({"want": ["solar"], "site": _js_site(_site()), "solarCases": cases})
+    for case, (alt, az) in zip(cases, js["solar"]):
+        dec = solar_declination_deg(day_of_year(case["month"], case["day"]))
+        py_alt, py_az = solar_position_deg(case["lat"], dec, case["hour"])
+        assert alt == pytest.approx(py_alt, abs=1e-9)
+        assert az == pytest.approx(py_az, abs=1e-9)
+
+
+# === 法52条2項 ========================================================
+
+@pytest.mark.parametrize("zone,far,width", [
+    ("1res", 4.0, 6.0), ("commercial", 6.0, 6.0), ("1res", 2.0, 8.0), ("1res", 4.0, 12.0),
+])
+def test_far_matches(zone, far, width):
+    specs = [{"kind": "road", "road_width_m": width}, {"kind": "adjacent"},
+             {"kind": "adjacent"}, {"kind": "adjacent"}]
+    site = _site(specs, zone=zone, far=far)
+    js = _run_js({"want": ["far"], "site": _js_site(site)})["far"]
+    py = compute_far(site)
+    assert js["effective"] == pytest.approx(py.effective_far)
+    assert js["maxRoadWidthM"] == pytest.approx(py.max_road_width_m)
+    if py.road_far is None:
+        assert js["roadFar"] is None
+    else:
+        assert js["roadFar"] == pytest.approx(py.road_far)
+
+
+# === 斜線制限 =========================================================
+
+def _height_parity(site, points):
+    js = _run_js({"want": ["heightLimits"], "site": _js_site(site),
+                  "points": [list(p) for p in points]})["heightLimits"]
+    for point, js_value in zip(points, js):
+        py_value = height_limit_at(site, point)
+        if math.isinf(py_value):
+            assert js_value is None, point
+        else:
+            assert js_value == pytest.approx(py_value, abs=1e-9), point
+
+
+def test_height_limits_match_basic():
+    _height_parity(_site(), [(15, 0), (15, 5), (15, 10), (15, 19), (1, 1), (29, 19)])
+
+
+def test_height_limits_match_with_setback_and_relaxations():
+    specs = [
+        {"kind": "road", "road_width_m": 6.0, "wall_setback_m": 2.0,
+         "relaxation": {"kind": "park", "width_m": 5.0}},
+        {"kind": "adjacent", "wall_setback_m": 1.0,
+         "relaxation": {"kind": "water", "width_m": 6.0}},
+        {"kind": "adjacent", "ground_level_diff_m": 3.0},
+        {"kind": "adjacent", "relaxation": {"kind": "railway", "width_m": 8.0}},
+    ]
+    _height_parity(_site(specs), [(15, 2), (15, 10), (28, 10), (2, 10), (15, 18)])
+
+
+def test_height_limits_match_for_north_slant_zones():
+    for zone, far in (("1low", 0.8), ("1mid", 2.0), ("2mid", 3.0)):
+        _height_parity(_site(zone=zone, far=far), [(15, 19), (15, 10), (15, 2)])
+
+
+def test_height_limits_match_with_rotated_north():
+    _height_parity(_site(zone="1low", far=0.8, north=90.0), [(2, 10), (15, 10), (28, 10)])
+
+
+def test_height_limits_match_for_commercial():
+    _height_parity(_site(zone="commercial", far=6.0), [(15, 0), (15, 10), (29, 10)])
+
+
+# === 令132条 ==========================================================
+
+def test_article_132_widths_match():
+    specs = [{"kind": "road", "road_width_m": 4.0}, {"kind": "road", "road_width_m": 10.0},
+             {"kind": "adjacent"}, {"kind": "adjacent"}]
+    site = _site(specs, far=4.0)
+    cases = [{"edgeIndex": 0, "point": p} for p in
+             ([25, 2], [2, 2], [2, 12], [15, 10], [29, 19])]
+    js = _run_js({"want": ["roadWidths"], "site": _js_site(site), "roadWidthCases": cases})
+    for case, js_width in zip(cases, js["roadWidths"]):
+        py_width, _ = road_slant.applied_width_at(site, tuple(case["point"]), site.edges[0])
+        assert js_width == pytest.approx(py_width), case
+
+
+# === 日影のみなし境界線 ================================================
+
+def test_deemed_boundary_offsets_match():
+    specs = [
+        {"kind": "road", "road_width_m": 6.0},
+        {"kind": "road", "road_width_m": 16.0},
+        {"kind": "adjacent", "relaxation": {"kind": "water", "width_m": 8.0}},
+        {"kind": "adjacent", "relaxation": {"kind": "railway", "width_m": 20.0}},
+    ]
+    site = _site(specs, far=4.0)
+    js = _run_js({"want": ["deemed"], "site": _js_site(site)})["deemed"]
+    assert js == pytest.approx(deemed_boundary_offsets(site))
+
+
+# === メッシュ =========================================================
+
+@pytest.mark.parametrize("cell,setback", [(5.0, 0.0), (3.0, 1.0), (4.0, 2.0)])
+def test_mesh_matches(cell, setback):
+    site = _site(setback=setback)
+    options = {"cellSizeXM": cell, "cellSizeYM": cell, "coverageThreshold": 0.5}
+    js = _run_js({"want": ["mesh"], "site": _js_site(site), "meshOptions": options})["mesh"]
+
+    area = build_mesh(site, cell_size_x_m=cell, cell_size_y_m=cell)
+    assign_height_limits(area)
+    assert js["cellCount"] == len(area.cells)
+    assert js["outlineArea"] == pytest.approx(area.outline_area_m2, rel=1e-6)
+    assert js["maxFloors"] == [c.max_floors for c in area.cells]
+
+
+# === 最適化（全体） ===================================================
+
+def _optimize_parity(site, cell, shadow_spec):
+    options = {"cellSizeXM": cell, "cellSizeYM": cell, "coverageThreshold": 0.5}
+    payload = {"want": ["optimize"], "site": _js_site(site), "meshOptions": options}
+    if shadow_spec is not None:
+        payload["shadowSpec"] = _js_shadow(shadow_spec)
+    js = _run_js(payload)["optimize"]
+
+    py = optimize(site, shadow_spec,
+                  OptimizeOptions(cell_size_x_m=cell, cell_size_y_m=cell))
+
+    assert js["floors"] == [int(f) for f in py.floors], "各マスの階数が一致していない"
+    assert js["volume"] == pytest.approx(py.volume_m3, rel=1e-6)
+    assert js["floorArea"] == pytest.approx(py.total_floor_area_m2, rel=1e-6)
+    assert js["buildingArea"] == pytest.approx(py.building_area_m2, rel=1e-6)
+    assert js["maxHeight"] == pytest.approx(py.max_height_m, rel=1e-6)
+    assert js["coverageLimited"] is py.coverage_limited
+    assert js["farLimited"] is py.far_limited
+    assert js["shadowLimited"] is py.shadow_limited
+    assert js["summary"] == py.summary_lines_ja()
+    return js, py
+
+
+def test_optimize_matches_without_shadow():
+    _optimize_parity(_site(), 5.0, None)
+
+
+def test_optimize_matches_with_shadow():
+    spec = ShadowRegulationSpec(
+        measurement_height_m=4.0, line_5m_max_hours=5.0, line_10m_max_hours=3.0,
+        time_step_minutes=30.0, sample_interval_m=6.0)
+    js, py = _optimize_parity(_site(), 5.0, spec)
+    assert py.shadow_limited, "この条件では日影が効くはず（テストの前提）"
+
+
+def test_optimize_matches_with_setback_and_relaxation():
+    specs = [
+        {"kind": "road", "road_width_m": 6.0, "wall_setback_m": 1.5},
+        {"kind": "adjacent", "wall_setback_m": 1.0},
+        {"kind": "adjacent", "wall_setback_m": 1.0,
+         "relaxation": {"kind": "water", "width_m": 4.0}},
+        {"kind": "adjacent", "wall_setback_m": 1.0},
+    ]
+    spec = ShadowRegulationSpec(
+        measurement_height_m=4.0, line_5m_max_hours=5.0, line_10m_max_hours=3.0,
+        time_step_minutes=30.0, sample_interval_m=6.0)
+    _optimize_parity(_site(specs), 4.0, spec)
+
+
+def test_optimize_matches_with_two_roads():
+    specs = [{"kind": "road", "road_width_m": 4.0}, {"kind": "road", "road_width_m": 10.0},
+             {"kind": "adjacent"}, {"kind": "adjacent"}]
+    _optimize_parity(_site(specs, far=4.0), 5.0, None)
+
+
+def test_optimize_matches_for_low_rise_zone():
+    _optimize_parity(_site(zone="1low", far=0.8, coverage=0.5), 5.0, None)

@@ -20,6 +20,7 @@
 
 
   let canvas, ctx;
+  let summaryId = 'summary-body';
 
   const HOME = { az: 225, el: 30, zoom: 1, panX: 0, panY: 0 };
   let view = Object.assign({}, HOME);
@@ -201,7 +202,8 @@
   }
 
   function renderSummary() {
-    const body = document.getElementById('summary-body');
+    if (summaryId === null) return;   // 呼び出し側が自前で描く場合
+    const body = document.getElementById(summaryId);
     if (!body) return;
     body.innerHTML = DATA.summary
       .map(s => '<div>' + s.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</div>').join('');
@@ -219,9 +221,19 @@
     if (ctx) resize();
   }
 
-  function init(initialData) {
+  /* options（すべて省略可）:
+   *   canvasId  … 描画先のcanvas要素のid（既定 'c'）
+   *   summaryId … サマリーを書き込む要素のid。null を渡すと書き込まない
+   *               （呼び出し側で書式を付けて描きたい場合に使う）
+   * 既存の呼び出し（Python版の出力・旧Web版）は引数なしなので、既定値で
+   * これまで通り動く。
+   */
+  function init(initialData, options) {
     if (initialData) DATA = initialData;
-    canvas = document.getElementById('c');
+    const opts = options || {};
+    if ('summaryId' in opts) summaryId = opts.summaryId;
+    canvas = document.getElementById(opts.canvasId || 'c');
+    if (!canvas) throw new Error('canvas が見つかりません: ' + (opts.canvasId || 'c'));
     ctx = canvas.getContext('2d');
     bindEvents();
     renderSummary();
@@ -229,5 +241,7 @@
     resize();
   }
 
-  global.JwcadVolumeViewer = { init, setData, draw, resetView };
+  // resize は、タブなどで隠れた状態から表示に切り替えたときに必要。
+  // 隠れている間は clientWidth が 0 なので、表示後に呼び直す。
+  global.JwcadVolumeViewer = { init, setData, draw, resetView, resize };
 })(typeof window !== 'undefined' ? window : globalThis);

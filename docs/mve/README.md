@@ -6,7 +6,22 @@
 > **設計初期段階の検討用です。確認申請には使えません。**
 > 必ず `disclaimer.md` を読んでから使ってください。
 
-## 使い方
+## 使い方は2通り
+
+### A. ブラウザだけ（インストール不要・おすすめ）
+
+```bash
+python3 tools/build_mve_web.py     # dist/MVE敷地入力.html ができます
+```
+
+出来たHTMLをダブルクリックすると入力画面が開きます。フォームに敷地条件を
+入れて「計算する」を押すだけで、平面図と3Dが出ます。Pythonもコマンド入力も
+不要です（詳細は [`web_ui.md`](web_ui.md)）。
+
+計算エンジンはPython版の移植で、**同じ入力なら同じ結果になることを自動
+テストで担保**しています（`tests/mve/test_js_parity.py`）。
+
+### B. コマンド版（DXF図面が必要な場合）
 
 ```bash
 mve examples/mve_sample.yaml
@@ -113,6 +128,7 @@ mesh:
 
 ## ドキュメント
 
+- `web_ui.md` — ブラウザ版UIの使い方とPython版との一致検証
 - `legal_basis.md` — どの計算がどの条文に基づくか、緩和対象の違いの一覧
 - `methodology.md` — ボクセル最適化の考え方と、旧方式との比較
 - `disclaimer.md` — 免責事項と未対応項目
