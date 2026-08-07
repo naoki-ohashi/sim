@@ -15,6 +15,7 @@ from shapely.geometry import LineString
 
 from ..envelope import EnvelopeResult
 from ..massing import Block
+from .isometric import isometric_segments
 
 PLAN_LAYER_COLORS = [1, 2, 3, 4, 5, 6, 7, 8, 30, 40]  # cycles through AutoCAD color indices
 
@@ -94,26 +95,58 @@ def _add_summary_text(msp, result: EnvelopeResult, offset: tuple[float, float]) 
         )
 
 
+ISO_LAYER_BY_KIND = {
+    "site": ("ISO-SITE", 8),
+    "outline": ("ISO-OUTLINE", 2),
+    "vertical": ("ISO-VERTICAL", 3),
+}
+
+
+def _add_isometric(
+    msp,
+    result: EnvelopeResult,
+    azimuth_deg: float,
+    elevation_deg: float,
+    offset: tuple[float, float],
+) -> None:
+    segments = isometric_segments(
+        result, azimuth_deg=azimuth_deg, elevation_deg=elevation_deg, origin=offset
+    )
+    for p1, p2, kind in segments:
+        layer, color = ISO_LAYER_BY_KIND.get(kind, ("ISO-OUTLINE", 2))
+        msp.add_line(p1, p2, dxfattribs={"layer": layer, "color": color})
+
+
 def write_envelope_dxf(
     result: EnvelopeResult,
     path: str,
     section_axis: str = "y",
     section_position: float | None = None,
+    isometric_azimuth_deg: float = 225.0,
+    isometric_elevation_deg: float = 30.0,
 ) -> None:
     if section_axis not in ("x", "y"):
         raise ValueError("section_axis must be 'x' or 'y'")
     doc = ezdxf.new("R2010", setup=False)
-    for name in ("SITE", "ENVELOPE-PLAN", "ENVELOPE-PLAN-TEXT", "SECTION-GL", "ENVELOPE-SECTION", "SUMMARY"):
+    for name in (
+        "SITE", "ENVELOPE-PLAN", "ENVELOPE-PLAN-TEXT", "SECTION-GL", "ENVELOPE-SECTION", "SUMMARY",
+        "ISO-SITE", "ISO-OUTLINE", "ISO-VERTICAL",
+    ):
         doc.layers.add(name)
     msp = doc.modelspace()
 
     minx, miny, maxx, maxy = _site_bounds(result)
+    width, height = maxx - minx, maxy - miny
     _add_plan(msp, result)
 
-    section_offset = (maxx + (maxx - minx) * 0.2 + 5.0, miny)
+    section_offset = (maxx + width * 0.2 + 5.0, miny)
     _add_section(msp, result, section_axis, section_position, section_offset)
 
-    summary_offset = (minx, miny - (maxy - miny) * 0.15 - 5.0)
+    summary_offset = (minx, miny - height * 0.15 - 5.0)
     _add_summary_text(msp, result, summary_offset)
+
+    # アイソメ図は平面図の上側に配置（断面図・サマリーと重ならない位置）
+    iso_offset = (minx, maxy + height * 0.2 + 5.0)
+    _add_isometric(msp, result, isometric_azimuth_deg, isometric_elevation_deg, iso_offset)
 
     doc.saveas(path)

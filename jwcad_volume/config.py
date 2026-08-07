@@ -15,8 +15,11 @@ from .zoning import ZoningParams
 class OutputSettings:
     dxf_path: str | None = None
     gaihen_text_path: str | None = None
+    html3d_path: str | None = None
     section_axis: str = "y"
     section_position: float | None = None
+    isometric_azimuth_deg: float = 225.0
+    isometric_elevation_deg: float = 30.0
 
 
 @dataclass

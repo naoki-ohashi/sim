@@ -58,5 +58,11 @@ shadow:
 
 output:
   dxf_path: envelope.dxf
+  # ブラウザで回して見られる3Dビューア（単一HTML・オフラインで開けます）
+  html3d_path: envelope_3d.html
   # gaihen_text_path: envelope_gaihen.txt  # experimental, see docs/jww_integration.md
   section_axis: y
+  # DXFに入れるアイソメ図の視点。方位角は真北から時計回り
+  # （225=南西から見る）、仰角は見下ろす角度。
+  isometric_azimuth_deg: 225.0
+  isometric_elevation_deg: 30.0

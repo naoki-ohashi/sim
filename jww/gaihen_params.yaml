@@ -32,6 +32,13 @@ units_per_meter: 1000.0
 # 計算結果を書き込むレイヤ番号（既存の図面を上書きしないよう別レイヤ推奨）
 result_layer: 8
 
+# --- アイソメ図（立体的な見え方を2Dの線で作図） ----------------------
+# JWWは2D CADなので回転はできませんが、平行投影した立体図を平面図の
+# 右隣に描き込みます。不要なら draw_isometric: false にしてください。
+draw_isometric: true
+isometric_azimuth_deg: 225.0    # 視点の方位（真北から時計回り。225=南西から）
+isometric_elevation_deg: 30.0   # 見下ろす角度
+
 # --- 用途地域など ---------------------------------------------------
 zoning:
   zone_type: 1res        # 選択肢は jwcad_volume/zoning.py を参照

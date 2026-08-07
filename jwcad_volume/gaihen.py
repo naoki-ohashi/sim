@@ -26,6 +26,7 @@ import yaml
 from .config import EnvelopeSettings, build_envelope_settings, build_shadow_params
 from .envelope import compute_max_envelope
 from .jwc import UNITS_PER_METER, JwcWriter, read_jwc_file
+from .output.isometric import default_origin, isometric_segments
 from .regulations.shadow import ShadowRegulationParams
 from .ring_builder import RingBuildError, build_ring
 from .site import Boundary, Site
@@ -38,6 +39,7 @@ DEFAULT_BOUNDARY_COLORS = {"road": 1, "adjacent": 2, "north": 3}
 RESULT_COLOR_SITE = 1
 RESULT_COLOR_ENVELOPE = 2
 RESULT_COLOR_TEXT = 4
+ISO_COLOR_BY_KIND = {"site": 1, "outline": 2, "vertical": 3}
 
 
 @dataclass
@@ -54,6 +56,9 @@ class GaihenParams:
     envelope: EnvelopeSettings = field(default_factory=EnvelopeSettings)
     shadow: ShadowRegulationParams | None = None
     result_layer: int = 8
+    draw_isometric: bool = True
+    isometric_azimuth_deg: float = 225.0
+    isometric_elevation_deg: float = 30.0
 
 
 def load_gaihen_params(path: str) -> GaihenParams:
@@ -81,6 +86,9 @@ def load_gaihen_params(path: str) -> GaihenParams:
         envelope=build_envelope_settings(data.get("envelope")),
         shadow=build_shadow_params(data.get("shadow")),
         result_layer=data.get("result_layer", 8),
+        draw_isometric=data.get("draw_isometric", True),
+        isometric_azimuth_deg=data.get("isometric_azimuth_deg", 225.0),
+        isometric_elevation_deg=data.get("isometric_elevation_deg", 30.0),
     )
 
 
@@ -135,6 +143,17 @@ def write_result_jwc(result, path: str, params: GaihenParams) -> None:
     w.set_attributes(color=RESULT_COLOR_ENVELOPE)
     for block in result.blocks:
         w.add_polyline([(x, y) for x, y, *_ in block.footprint.exterior.coords], close=True)
+
+    if params.draw_isometric:
+        # 平面図の右隣にアイソメ図（2Dの線分として作図）
+        for p1, p2, kind in isometric_segments(
+            result,
+            azimuth_deg=params.isometric_azimuth_deg,
+            elevation_deg=params.isometric_elevation_deg,
+            origin=default_origin(result),
+        ):
+            w.set_attributes(color=ISO_COLOR_BY_KIND.get(kind, RESULT_COLOR_ENVELOPE))
+            w.add_line(p1, p2)
 
     # サマリーは敷地の下側に並べる
     xs = [p[0] for p in result.site.points]

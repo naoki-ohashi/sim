@@ -41,6 +41,41 @@ def test_write_envelope_dxf_roundtrip(tmp_path):
     assert len(summary_texts) > 0
 
 
+def test_dxf_contains_isometric_on_its_own_layers(tmp_path):
+    site = _site()
+    result = compute_max_envelope(
+        site, n_layers=6, interval_m=10.0, n_azimuth=30, search_iterations=6, use_sky_ratio=False
+    )
+    out_path = tmp_path / "envelope.dxf"
+    write_envelope_dxf(result, str(out_path))
+
+    msp = ezdxf.readfile(str(out_path)).modelspace()
+    iso_layers = {e.dxf.layer for e in msp if e.dxftype() == "LINE" and e.dxf.layer.startswith("ISO-")}
+    assert {"ISO-SITE", "ISO-OUTLINE", "ISO-VERTICAL"} <= iso_layers
+
+
+def test_isometric_does_not_overlap_the_plan(tmp_path):
+    site = _site()
+    result = compute_max_envelope(
+        site, n_layers=6, interval_m=10.0, n_azimuth=30, search_iterations=6, use_sky_ratio=False
+    )
+    out_path = tmp_path / "envelope.dxf"
+    write_envelope_dxf(result, str(out_path))
+
+    msp = ezdxf.readfile(str(out_path)).modelspace()
+    plan_max_y = max(
+        max(v[1] for v in e.get_points("xy"))
+        for e in msp
+        if e.dxftype() == "LWPOLYLINE" and e.dxf.layer in ("SITE", "ENVELOPE-PLAN")
+    )
+    iso_min_y = min(
+        min(e.dxf.start.y, e.dxf.end.y)
+        for e in msp
+        if e.dxftype() == "LINE" and e.dxf.layer.startswith("ISO-")
+    )
+    assert iso_min_y > plan_max_y
+
+
 def test_write_envelope_dxf_rejects_bad_axis(tmp_path):
     site = _site()
     result = compute_max_envelope(

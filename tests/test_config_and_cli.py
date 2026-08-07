@@ -61,6 +61,31 @@ def test_cli_end_to_end_writes_dxf(tmp_path, capsys):
     assert any(e.dxftype() == "LWPOLYLINE" for e in doc.modelspace())
 
 
+def test_cli_html_out_writes_viewer(tmp_path, capsys):
+    dxf_path = tmp_path / "out.dxf"
+    html_path = tmp_path / "viewer.html"
+    config_path = tmp_path / "site.yaml"
+    config_path.write_text(FAST_YAML.format(dxf_path=str(dxf_path)))
+
+    rc = main([str(config_path), "--html-out", str(html_path)])
+    assert rc == 0
+    assert html_path.exists()
+    assert "敷地面積" in html_path.read_text(encoding="utf-8")
+    assert f"wrote {html_path}" in capsys.readouterr().out
+
+
+def test_cli_html_path_from_config(tmp_path):
+    dxf_path = tmp_path / "out.dxf"
+    html_path = tmp_path / "from_config.html"
+    config_path = tmp_path / "site.yaml"
+    config_path.write_text(
+        FAST_YAML.format(dxf_path=str(dxf_path)) + f"  html3d_path: {html_path}\n"
+    )
+
+    assert main([str(config_path)]) == 0
+    assert html_path.exists()
+
+
 def test_cli_dxf_out_override(tmp_path):
     dxf_path = tmp_path / "configured.dxf"
     override_path = tmp_path / "override.dxf"

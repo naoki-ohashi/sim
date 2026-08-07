@@ -15,6 +15,7 @@ from .config import load_project
 from .envelope import compute_max_envelope
 from .output.dxf_writer import write_envelope_dxf
 from .output.gaihen_text import write_envelope_gaihen_text
+from .output.html3d import write_viewer_html
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -22,6 +23,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("config", help="path to a YAML project config (see examples/sample_site.yaml)")
     parser.add_argument("--dxf-out", help="override output.dxf_path from the config")
     parser.add_argument("--gaihen-text-out", help="override output.gaihen_text_path (experimental, see docs)")
+    parser.add_argument("--html-out", help="write a self-contained 3D viewer HTML (override output.html3d_path)")
     parser.add_argument("--no-sky-ratio", action="store_true", help="disable the 天空率 tower search")
     args = parser.parse_args(argv)
 
@@ -50,6 +52,11 @@ def main(argv: list[str] | None = None) -> int:
             section_position=project.output.section_position,
         )
         print(f"wrote {dxf_path}")
+
+    html_path = args.html_out or project.output.html3d_path
+    if html_path:
+        write_viewer_html(result, html_path)
+        print(f"wrote {html_path} (open in any browser; no internet needed)")
 
     gaihen_path = args.gaihen_text_out or project.output.gaihen_text_path
     if gaihen_path:

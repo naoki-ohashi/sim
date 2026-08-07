@@ -120,6 +120,31 @@ def test_run_overwrites_temp_file_with_result(tmp_path):
     assert any(line.startswith("ch ") for line in doc.unknown)  # サマリー文字
 
 
+def test_run_draws_isometric_beside_the_plan(tmp_path):
+    temp = _write(tmp_path, "JWC_TEMP.TXT", SITE_JWC)
+    params_path = _write(tmp_path, "gaihen_params.yaml", PARAMS_YAML, "utf-8")
+    run(str(temp), str(params_path))
+
+    doc = parse_jwc(temp.read_text(encoding="shift_jis"))
+    # 敷地は 0〜30m の範囲。アイソメ図はその右側に置かれる
+    assert max(max(s.x1, s.x2) for s in doc.lines) > 30.0
+
+
+def test_isometric_can_be_switched_off(tmp_path):
+    temp_on = _write(tmp_path, "on.txt", SITE_JWC)
+    temp_off = _write(tmp_path, "off.txt", SITE_JWC)
+    params_on = _write(tmp_path, "on.yaml", PARAMS_YAML, "utf-8")
+    params_off = _write(tmp_path, "off.yaml", PARAMS_YAML + "\ndraw_isometric: false\n", "utf-8")
+
+    run(str(temp_on), str(params_on))
+    run(str(temp_off), str(params_off))
+
+    lines_on = parse_jwc(temp_on.read_text(encoding="shift_jis")).lines
+    lines_off = parse_jwc(temp_off.read_text(encoding="shift_jis")).lines
+    assert len(lines_on) > len(lines_off)
+    assert max(max(s.x1, s.x2) for s in lines_off) <= 30.0 + 1e-6
+
+
 def test_main_returns_zero_and_writes_result(tmp_path):
     temp = _write(tmp_path, "JWC_TEMP.TXT", SITE_JWC)
     params_path = _write(tmp_path, "gaihen_params.yaml", PARAMS_YAML, "utf-8")

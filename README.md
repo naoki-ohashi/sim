@@ -16,7 +16,8 @@ JW-CAD（JWW）向けの外部変形プログラム：**道路斜線制限・隣
 - 冬至等の指定日の日影時間を計算し、日影規制ラインでの適合性を確認、
   違反時は建物高さを自動的に縮小
 - 建蔽率・容積率の上限を反映
-- JW-CAD/JWWへ読み込み可能なDXFファイル（平面・断面・サマリー付き）を出力
+- JW-CAD/JWWへ読み込み可能なDXFファイル（平面・断面・アイソメ・サマリー付き）を出力
+- **ブラウザで回して見られる3Dビューア**（単一HTML・外部ライブラリなし）を出力
 
 ## 使い方は2通り
 
@@ -55,6 +56,24 @@ DXF読み込み機能でそのまま開けます（レイヤー構成は
 `n_layers` / `interval_m` / `n_azimuth` / `search_iterations` を上げてください
 （数十秒～数分かかるようになります）。
 
+## 3Dで確認する
+
+```bash
+jwcad-volume examples/sample_site.yaml --html-out volume3d.html
+```
+
+出来たHTMLをダブルクリックすればブラウザで開き、マウスで回して確認
+できます。**斜線制限のエンベロープ（青の半透明）の中に最終ボリューム
+（オレンジ）が収まっている**様子が見え、すき間が建蔽率・容積率・
+日影規制で削られた分になります。外部ライブラリもCDNも使っていないので
+オフラインで開け、そのままメール添付で渡せます。
+
+JWWの中で立体を見たい場合は、平行投影した**アイソメ図**が平面図の隣に
+2Dの線分として作図されます（JWWは2D CADなので回転はできませんが、
+視点の方位・仰角は設定で変更でき、新しいソフトは不要です）。
+
+詳しくは `docs/3d_view.md` を参照してください。
+
 ## B. JWWの外部変形として使う
 
 Windowsで `build_windows.bat` を実行するとexe一式が `dist\jww\` にできます
@@ -92,6 +111,7 @@ jwcad_volume/
   jwc.py                      # JWW外部変形のデータ形式(JWC_TEMP.TXT)読み書き
   ring_builder.py             # バラバラの線分群から閉じた敷地ポリゴンを再構成
   gaihen.py                   # 外部変形エントリポイント(図面→計算→図面)
+  mesh.py                     # 3D面の生成と軸測投影(3Dビューア/アイソメ共通)
   regulations/
     road_slant.py             # 道路斜線制限
     adjacent_slant.py         # 隣地斜線制限
@@ -102,12 +122,15 @@ jwcad_volume/
     shadow.py                  # 日影規制(日影時間の集計)
   output/
     dxf_writer.py               # DXF出力(検証済み・推奨)
+    html3d.py                    # ブラウザ3Dビューア(単一HTML・依存ライブラリなし)
+    isometric.py                 # アイソメ図を2D線分として生成
     gaihen_text.py               # JWW外部変形ネイティブ形式(実験的・未検証)
   config.py                    # YAML設定ファイルの読み込み
   cli.py                       # コマンドラインエントリポイント
 tests/                          # pytest一式(法令根拠の基準値検証を含む)
 docs/
   windows_setup.md              # Windows導入手順(A/B両方)
+  3d_view.md                    # 3D確認の方法(ブラウザ/アイソメ図)
   disclaimer.md                # 免責事項・本ツールの限界
   legal_basis.md                # 各計算の法的根拠まとめ
   methodology.md                # 最大ボリューム探索アルゴリズムの解説

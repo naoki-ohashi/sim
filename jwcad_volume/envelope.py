@@ -267,6 +267,50 @@ class EnvelopeResult:
     def total_floor_area_m2(self) -> float:
         return total_floor_area(self.blocks, self.site.floor_height_m)
 
+    def summary_lines_ja(self) -> list[str]:
+        """日本語のサマリー。文字コードを自前で管理できる出力先
+        （HTMLビューア）専用です。DXFとコンソール出力は、JWWのDXF読込や
+        Windowsコンソールの文字コードでの文字化けを避けるため、ASCIIの
+        `summary_lines()` を使います。"""
+        lines = [
+            f"敷地面積: {self.site.area_m2:.1f} m2",
+            f"建築面積: {self.footprint_area_m2:.1f} m2"
+            f"（建蔽率の上限 {self.site.max_building_area_m2():.1f} m2）",
+            f"延床面積(概算): {self.total_floor_area_m2:.1f} m2"
+            f"（容積率の上限 {self.site.max_total_floor_area_m2():.1f} m2）",
+            f"最高高さ: {self.max_height_m:.2f} m",
+            f"体積: {self.volume_m3:.1f} m3",
+        ]
+        if self.tower.extra_height_m > 0:
+            lines.append(
+                f"天空率による割増: 高さ{self.tower.split_height_m:.1f}mから上を"
+                f"{self.tower.tower_footprint_area_m2:.1f} m2の平面で"
+                f"+{self.tower.extra_height_m:.1f}m"
+            )
+        else:
+            lines.append("天空率による割増: なし（斜線制限のままが最大）")
+        caps = []
+        if self.coverage_cap_applied:
+            caps.append("建蔽率")
+        if self.far_cap_applied:
+            caps.append("容積率")
+        lines.append("上限に達した規制: " + ("・".join(caps) if caps else "なし"))
+        ok_count = sum(1 for c in self.sky_ratio_checks if c.ok)
+        lines.append(f"天空率の判定: {ok_count}/{len(self.sky_ratio_checks)} 点が適合")
+        if self.shadow_checks is not None:
+            if self.shadow_height_scale < 1.0:
+                lines.append(f"日影規制により高さを {self.shadow_height_scale:.1%} に縮小")
+            else:
+                lines.append("日影規制による縮小: なし")
+            for c in self.shadow_checks:
+                worst = c.worst_point[1]
+                label = "第1種" if c.line_name == "line1" else "第2種"
+                lines.append(
+                    f"　{label}測定線（{c.max_hours}時間以内）: "
+                    f"{'適合' if c.ok else '不適合'} / 最大 {worst:.2f}時間"
+                )
+        return lines
+
     def summary_lines(self) -> list[str]:
         lines = [
             f"site area: {self.site.area_m2:.1f} m2",
