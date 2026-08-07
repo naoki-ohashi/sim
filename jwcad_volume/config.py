@@ -62,7 +62,7 @@ def _build_site(data: dict) -> Site:
     return Site(points=points, edges=edges, zoning=zoning, floor_height_m=data.get("floor_height_m", 3.2))
 
 
-def _build_envelope_settings(data: dict | None) -> EnvelopeSettings:
+def build_envelope_settings(data: dict | None) -> EnvelopeSettings:
     data = data or {}
     kwargs = dict(data)
     if "split_fractions" in kwargs:
@@ -70,7 +70,7 @@ def _build_envelope_settings(data: dict | None) -> EnvelopeSettings:
     return EnvelopeSettings(**kwargs)
 
 
-def _build_shadow_params(data: dict | None) -> ShadowRegulationParams | None:
+def build_shadow_params(data: dict | None) -> ShadowRegulationParams | None:
     if data is None:
         return None
     return ShadowRegulationParams(**data)
@@ -85,7 +85,7 @@ def load_project(path: str) -> Project:
         data = yaml.safe_load(f)
     return Project(
         site=_build_site(data["site"]),
-        envelope=_build_envelope_settings(data.get("envelope")),
-        shadow=_build_shadow_params(data.get("shadow")),
+        envelope=build_envelope_settings(data.get("envelope")),
+        shadow=build_shadow_params(data.get("shadow")),
         output=_build_output_settings(data.get("output")),
     )

@@ -15,6 +15,7 @@ dev = ["pytest>=7.0"]
 
 [project.scripts]
 jwcad-volume = "jwcad_volume.cli:main"
+jwcad-volume-gaihen = "jwcad_volume.gaihen:main"
 
 [build-system]
 requires = ["setuptools>=68"]

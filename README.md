@@ -18,6 +18,16 @@ JW-CAD（JWW）向けの外部変形プログラム：**道路斜線制限・隣
 - 建蔽率・容積率の上限を反映
 - JW-CAD/JWWへ読み込み可能なDXFファイル（平面・断面・サマリー付き）を出力
 
+## 使い方は2通り
+
+| | A. コマンド実行 → DXFをJWWで開く | B. JWWの外部変形として使う |
+|---|---|---|
+| 手軽さ | ◎ すぐ試せる | △ exeビルドが必要 |
+| 確実性 | ◎ DXF読込はJWWの標準機能 | △ 外部変形の書式は実機未検証 |
+| 操作感 | 敷地条件をYAMLに書く | JWW上で敷地を選んで実行 |
+
+**Windowsでの導入手順は `docs/windows_setup.md` に詳しくまとめてあります。**
+
 ## インストール
 
 ```bash
@@ -26,7 +36,7 @@ pip install -e .
 
 Python 3.9+、依存パッケージ: shapely, ezdxf, numpy, PyYAML（`pyproject.toml` 参照）。
 
-## クイックスタート
+## A. クイックスタート（コマンド実行）
 
 ```bash
 jwcad-volume examples/sample_site.yaml
@@ -45,6 +55,30 @@ DXF読み込み機能でそのまま開けます（レイヤー構成は
 `n_layers` / `interval_m` / `n_azimuth` / `search_iterations` を上げてください
 （数十秒～数分かかるようになります）。
 
+## B. JWWの外部変形として使う
+
+Windowsで `build_windows.bat` を実行するとexe一式が `dist\jww\` にできます
+（Pythonのないパソコンでも動くexeになります）。
+
+JWWで敷地の外形線を**辺ごとに線色を変えて**描き、範囲選択して
+[その他]-[外部変形] から `最大ボリューム計算.bat` を選ぶと、結果が
+図面に作図されます。
+
+| 線色 | 意味 |
+|---|---|
+| 線色1 | 道路境界線 |
+| 線色2 | 隣地境界線 |
+| 線色3 | 北側境界線（真北側の辺） |
+
+用途地域・容積率・道路幅員など図面から読み取れない条件は
+`gaihen_params.yaml` に書きます。
+
+> **外部変形のデータ書式は実機JWWで検証できていません**（開発環境で
+> JWW本体を実行できないため）。うまく動かない場合は、同梱の
+> `診断_データ確認.bat` でJWWが実際に渡してくるデータを採取し、
+> `docs/jww_integration.md` の手順で調整してください。書式を直す箇所は
+> `jwc.py` とバッチの制御行だけで、計算エンジンには影響しません。
+
 ## 構成
 
 ```
@@ -55,6 +89,9 @@ jwcad_volume/
   massing.py                  # 建物ボリューム(Block=平面形状×高さ範囲の積層)
   solar.py                    # 太陽位置(高度・方位角)計算
   envelope.py                 # 最大ボリューム探索(compute_max_envelope)
+  jwc.py                      # JWW外部変形のデータ形式(JWC_TEMP.TXT)読み書き
+  ring_builder.py             # バラバラの線分群から閉じた敷地ポリゴンを再構成
+  gaihen.py                   # 外部変形エントリポイント(図面→計算→図面)
   regulations/
     road_slant.py             # 道路斜線制限
     adjacent_slant.py         # 隣地斜線制限
@@ -70,10 +107,16 @@ jwcad_volume/
   cli.py                       # コマンドラインエントリポイント
 tests/                          # pytest一式(法令根拠の基準値検証を含む)
 docs/
+  windows_setup.md              # Windows導入手順(A/B両方)
   disclaimer.md                # 免責事項・本ツールの限界
   legal_basis.md                # 各計算の法的根拠まとめ
   methodology.md                # 最大ボリューム探索アルゴリズムの解説
-  jww_integration.md            # JW-CAD/JWWへの取り込み方法
+  jww_integration.md            # JW-CAD/JWWへの取り込み方法・書式調整
+jww/                            # JWW外部変形として配布するファイル
+  最大ボリューム計算.bat          # 外部変形メニューに登録するバッチ
+  診断_データ確認.bat             # 書式確認用(図面は変更しない)
+  gaihen_params.yaml            # 用途地域・道路幅員などの設定
+build_windows.bat               # Windows用exeビルドスクリプト
 examples/sample_site.yaml       # サンプル設定ファイル
 ```
 

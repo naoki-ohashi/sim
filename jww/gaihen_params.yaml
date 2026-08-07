@@ -1,0 +1,67 @@
+# JWW外部変形の実行条件
+#
+# 敷地の「形」は図面から読み取るので、ここには図面から読み取れない条件
+# （用途地域・容積率・道路幅員など）だけを書きます。
+# このファイルは exe と同じフォルダに置いてください。
+
+# --- 線色と境界種別の対応 -------------------------------------------
+# JWWで敷地の外形線を描くとき、辺ごとに線色を変えて種別を指定します。
+# ここに無い線色の辺は「規制なし」として扱われます。
+boundary_colors:
+  road: 1       # 線色1 = 道路境界線
+  adjacent: 2   # 線色2 = 隣地境界線
+  north: 3      # 線色3 = 北側境界線（真北側の辺に使う）
+
+# 前面道路の幅員(m)。道路境界線が複数あり幅員が違う場合は、
+# 道路ごとに違う線色を割り当てて road_width_by_color で指定してください。
+road_width_m: 6.0
+# road_width_by_color:
+#   1: 6.0
+#   5: 4.0
+
+# 斜線制限の後退緩和に使う、建物を境界線から下げる距離(m)。
+# 緩和を見込まない安全側で計算するなら 0.0 のままにします。
+setback_m: 0.0
+
+# 階高(m)。延床面積の概算に使います。
+floor_height_m: 3.2
+
+# 図面の座標単位。JWWの実寸mmなら1000、m単位で作図しているなら1。
+units_per_meter: 1000.0
+
+# 計算結果を書き込むレイヤ番号（既存の図面を上書きしないよう別レイヤ推奨）
+result_layer: 8
+
+# --- 用途地域など ---------------------------------------------------
+zoning:
+  zone_type: 1res        # 選択肢は jwcad_volume/zoning.py を参照
+  far_ratio: 2.0          # 容積率 200%
+  coverage_ratio: 0.6     # 建蔽率 60%
+  absolute_height_limit_m: null   # 低層住専の10m/12m制限がある場合に数値を入れる
+
+# --- 計算の精度と速度 -----------------------------------------------
+# 既定は数秒で終わる粗めの設定です。条件が固まったら精度を上げてください
+# （n_layers: 30, interval_m: 2.0, n_azimuth: 180, search_iterations: 24 など）。
+envelope:
+  n_layers: 10
+  interval_m: 4.0
+  n_azimuth: 45
+  use_sky_ratio: true
+  split_fractions: [0.3, 0.5, 0.7]
+  search_iterations: 12
+
+# --- 日影規制 -------------------------------------------------------
+# このセクションごと消すと日影規制のチェックを省略します。
+# 時間数・測定線距離は必ず適用される自治体の条例（別表第四相当）を確認してください。
+shadow:
+  measurement_month: 12
+  measurement_day: 22
+  start_hour: 8.0
+  end_hour: 16.0
+  time_step_minutes: 20.0
+  measurement_height_m: 4.0
+  latitude_deg: 35.7
+  line1_distance_m: 5.0
+  line1_max_hours: 5.0
+  line2_distance_m: 10.0
+  line2_max_hours: 3.0
