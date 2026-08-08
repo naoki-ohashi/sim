@@ -84,3 +84,32 @@ def test_view_is_zoomed_to_the_drawing(dxf):
     """開いた直後に図面全体が見えるよう、表示範囲を合わせてある。"""
     vp = ezdxf.readfile(str(dxf)).viewports.get("*Active")[0]
     assert vp.dxf.height > 1000.0     # mm。既定の420x297のままではない
+
+
+def test_checker_accepts_our_output(dxf, capsys):
+    """`tools/check_dxf.py` が、自分たちの出力を合格と判定すること。"""
+    import sys
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2]))
+    from tools.check_dxf import main
+
+    assert main([str(dxf)]) == 0
+    assert "JWWで読めるはずです" in capsys.readouterr().out
+
+
+def test_checker_rejects_the_old_broken_format(tmp_path, capsys):
+    """以前の書式（R2010・LWPOLYLINE・m単位）はNGと判定されること。"""
+    import sys
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2]))
+    from tools.check_dxf import main
+
+    doc = ezdxf.new("R2010", setup=False)
+    doc.layers.add("SITE")
+    doc.modelspace().add_lwpolyline(
+        [(0, 0), (30, 0), (30, 20), (0, 20)], close=True, dxfattribs={"layer": "SITE"})
+    path = tmp_path / "old.dxf"
+    doc.saveas(str(path))
+
+    assert main([str(path)]) == 1
+    out = capsys.readouterr().out
+    assert "LWPOLYLINE" in out
+    assert "R12" in out
