@@ -16,6 +16,7 @@ from pathlib import Path
 from ..massing import Block
 from ..optimizer import OptimizeResult
 from ..regulations.sky_ratio import reference_building
+from .dxf_pen import ensure_parent_dir
 
 
 def _viewer_js_path() -> Path:
@@ -158,5 +159,6 @@ def build_html(result: OptimizeResult, title: str = "MVE 最大ボリューム")
 
 
 def write_html(result: OptimizeResult, path: str, title: str = "MVE 最大ボリューム") -> None:
+    ensure_parent_dir(path)
     with open(path, "w", encoding="utf-8") as f:
         f.write(build_html(result, title))

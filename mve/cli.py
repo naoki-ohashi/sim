@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 from .config import load_project
@@ -55,19 +56,36 @@ def main(argv: list[str] | None = None) -> int:
     dxf_path = args.dxf_out or project.output.dxf_path
     if dxf_path:
         units = args.dxf_units or project.output.dxf_units_per_meter
-        write_dxf(result, dxf_path,
-                  draw_mesh=project.output.draw_mesh,
-                  draw_floor_labels=project.output.draw_floor_labels,
-                  units_per_meter=units)
-        print(f"図面を書き出しました: {dxf_path}"
+        try:
+            write_dxf(result, dxf_path,
+                      draw_mesh=project.output.draw_mesh,
+                      draw_floor_labels=project.output.draw_floor_labels,
+                      units_per_meter=units)
+        except OSError as exc:
+            return _write_failed("図面", dxf_path, exc)
+        print(f"図面を書き出しました: {os.path.abspath(dxf_path)}"
               f"（DXF R12・1m={units:g}単位）")
 
     html_path = args.html_out or project.output.html_path
     if html_path:
-        write_html(result, html_path)
-        print(f"3Dビューアを書き出しました: {html_path}（ブラウザで開けます）")
+        try:
+            write_html(result, html_path)
+        except OSError as exc:
+            return _write_failed("3Dビューア", html_path, exc)
+        print(f"3Dビューアを書き出しました: {os.path.abspath(html_path)}"
+              "（ブラウザで開けます）")
 
     return 0
+
+
+def _write_failed(what: str, path: str, exc: OSError) -> int:
+    """書き出しに失敗した理由を、traceback ではなく日本語で伝える。"""
+    print(f"{what}の書き出しに失敗しました: {path}", file=sys.stderr)
+    print(f"  理由: {exc.strerror or exc}", file=sys.stderr)
+    print("  出力先のドライブ名・フォルダ名が正しいか、書き込み権限があるか、"
+          "同じファイルを他のソフト（JW-CADなど）で開いたままになっていないか"
+          "確認してください。", file=sys.stderr)
+    return 1
 
 
 if __name__ == "__main__":

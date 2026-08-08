@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import pathlib
 from typing import Iterable, Sequence
 
 import ezdxf
@@ -107,4 +108,16 @@ class JwwDrawing:
     def save(self, path: str) -> None:
         # 開いたときに図面全体が見えるよう、表示範囲を図形に合わせる
         zoom.extents(self.msp, factor=1.05)
+        ensure_parent_dir(path)
         self.doc.saveas(path, encoding=DXF_ENCODING)
+
+
+def ensure_parent_dir(path: str) -> None:
+    """出力先のフォルダが無ければ作る。
+
+    設定ファイルに `C:\\Users\\...\\Desktop\\敷地検討.dxf` のような絶対パスを
+    書いたとき、途中のフォルダが無いだけで例外になるのを防ぎます。
+    """
+    parent = pathlib.Path(path).expanduser().parent
+    if str(parent):
+        parent.mkdir(parents=True, exist_ok=True)
