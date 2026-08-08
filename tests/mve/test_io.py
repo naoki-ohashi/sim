@@ -137,10 +137,11 @@ def test_dxf_draws_the_road_band(tmp_path):
     path = tmp_path / "out.dxf"
     write_dxf(result, str(path))
     msp = ezdxf.readfile(str(path)).modelspace()
-    roads = [e for e in msp if e.dxf.layer == "MVE-ROAD" and e.dxftype() == "LWPOLYLINE"]
+    roads = [e for e in msp if e.dxf.layer == "MVE-ROAD" and e.dxftype() == "LINE"]
     assert roads
-    # 6m 道路が敷地の外（y<0）に描かれている
-    assert min(v[1] for v in roads[0].get_points("xy")) == pytest.approx(-6.0)
+    # 6m 道路が敷地の外（y<0）に描かれている。図面はmmなので -6000。
+    ys = [v for e in roads for v in (e.dxf.start.y, e.dxf.end.y)]
+    assert min(ys) == pytest.approx(-6000.0)
 
 
 def test_dxf_floor_labels_can_be_disabled(tmp_path):

@@ -85,3 +85,7 @@ output:
   html_path: mve_result.html
   draw_mesh: true
   draw_floor_labels: true
+  # DXFは JW-CAD が読める形式（R12・LINEとTEXTのみ・mm）で書き出します。
+  # 1mを何単位で書くか。JW-CADはmmなので既定の1000のままで構いません。
+  # mで作図している図面に合わせたい場合だけ 1 にしてください。
+  dxf_units_per_meter: 1000

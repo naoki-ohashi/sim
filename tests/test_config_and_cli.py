@@ -58,7 +58,7 @@ def test_cli_end_to_end_writes_dxf(tmp_path, capsys):
     assert f"wrote {dxf_path}" in captured.out
 
     doc = ezdxf.readfile(str(dxf_path))
-    assert any(e.dxftype() == "LWPOLYLINE" for e in doc.modelspace())
+    assert any(e.dxftype() == "LINE" for e in doc.modelspace())
 
 
 def test_cli_html_out_writes_viewer(tmp_path, capsys):

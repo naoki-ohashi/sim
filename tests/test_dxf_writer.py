@@ -31,12 +31,14 @@ def test_write_envelope_dxf_roundtrip(tmp_path):
 
     doc = ezdxf.readfile(str(out_path))
     msp = doc.modelspace()
-    plan_polylines = [e for e in msp if e.dxftype() == "LWPOLYLINE" and e.dxf.layer == "ENVELOPE-PLAN"]
-    assert len(plan_polylines) == len(result.blocks)
-    site_polylines = [e for e in msp if e.dxftype() == "LWPOLYLINE" and e.dxf.layer == "SITE"]
-    assert len(site_polylines) == 1
-    section_polylines = [e for e in msp if e.dxftype() == "LWPOLYLINE" and e.dxf.layer == "ENVELOPE-SECTION"]
-    assert len(section_polylines) >= 1
+
+    def lines(layer):
+        return [e for e in msp if e.dxftype() == "LINE" and e.dxf.layer == layer]
+
+    # 敷地は正方形なので4辺ぶんのLINEになる（LWPOLYLINEはJWWが読めない）
+    assert len(lines("SITE")) == 4
+    assert len(lines("ENVELOPE-PLAN")) >= 3 * len(result.blocks)
+    assert lines("ENVELOPE-SECTION")
     summary_texts = [e for e in msp if e.dxftype() == "TEXT" and e.dxf.layer == "SUMMARY"]
     assert len(summary_texts) > 0
 
@@ -64,9 +66,9 @@ def test_isometric_does_not_overlap_the_plan(tmp_path):
 
     msp = ezdxf.readfile(str(out_path)).modelspace()
     plan_max_y = max(
-        max(v[1] for v in e.get_points("xy"))
+        max(e.dxf.start.y, e.dxf.end.y)
         for e in msp
-        if e.dxftype() == "LWPOLYLINE" and e.dxf.layer in ("SITE", "ENVELOPE-PLAN")
+        if e.dxftype() == "LINE" and e.dxf.layer in ("SITE", "ENVELOPE-PLAN")
     )
     iso_min_y = min(
         min(e.dxf.start.y, e.dxf.end.y)

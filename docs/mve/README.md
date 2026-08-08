@@ -120,6 +120,13 @@ mesh:
 | `MVE-NORTH` | 真北記号 |
 | `MVE-SUMMARY` | 計算結果の要約 |
 
+JWWが読める形式で書き出します（**DXF R12・LINEとTEXTのみ・mm**）。JWWの
+DXF読込は古い仕様しか受け付けず、これを外すと読み込みは成功したように
+見えて図面に何も表示されません（`jww_integration.md` に詳細）。
+
+mで作図している図面に合わせたい場合は `--dxf-units 1`、または設定YAMLの
+`output.dxf_units_per_meter: 1` を指定してください。
+
 ### 3Dビューア（HTML）
 
 ダブルクリックで開き、マウスで回せます。外部ライブラリもCDNも使わないので

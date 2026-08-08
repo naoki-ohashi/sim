@@ -25,6 +25,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--html-out", help="3Dビューアの出力先（output.html_path を上書き）")
     parser.add_argument("--no-shadow", action="store_true", help="日影規制のチェックを省略する")
     parser.add_argument("--cell", type=float, help="メッシュのXY幅(m)をまとめて指定する")
+    parser.add_argument(
+        "--dxf-units", type=float, metavar="単位",
+        help="DXFで1mを何単位として書くか（既定1000＝mm。JW-CADはmmなので通常そのまま）",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -50,10 +54,13 @@ def main(argv: list[str] | None = None) -> int:
 
     dxf_path = args.dxf_out or project.output.dxf_path
     if dxf_path:
+        units = args.dxf_units or project.output.dxf_units_per_meter
         write_dxf(result, dxf_path,
                   draw_mesh=project.output.draw_mesh,
-                  draw_floor_labels=project.output.draw_floor_labels)
-        print(f"図面を書き出しました: {dxf_path}")
+                  draw_floor_labels=project.output.draw_floor_labels,
+                  units_per_meter=units)
+        print(f"図面を書き出しました: {dxf_path}"
+              f"（DXF R12・1m={units:g}単位）")
 
     html_path = args.html_out or project.output.html_path
     if html_path:

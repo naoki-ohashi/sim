@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 
 import yaml
 
+from .io.dxf_pen import JWW_UNITS_PER_METER
 from .io.dxf_site import read_site_plan
 from .north import NorthReference
 from .optimizer import OptimizeOptions
@@ -28,6 +29,8 @@ class OutputSettings:
     html_path: str | None = None
     draw_mesh: bool = True
     draw_floor_labels: bool = True
+    #: 図面1mを何単位で書くか。JW-CADはmmなので既定は1000。
+    dxf_units_per_meter: float = JWW_UNITS_PER_METER
 
 
 @dataclass

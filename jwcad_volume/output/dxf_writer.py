@@ -5,13 +5,19 @@ results into JW-CAD/JWW -- DXF import ([ファイル]-[開く] or [図面編集]
 unlike the native 外部変形 exchange format (see gaihen_text.py), whose exact
 byte-level protocol this project has not been able to verify against a real
 JWW installation.
+
+JWW only reads old-style DXF, so the drawing is written through
+``mve.io.dxf_pen.JwwDrawing`` (R12, LINE/TEXT only, millimetres, Shift-JIS).
+Writing R2010 with LWPOLYLINE in metres -- as this module used to -- imports
+without an error but leaves the JWW drawing empty. See ``dxf_pen.py``.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-import ezdxf
 from shapely.geometry import LineString
+
+from mve.io.dxf_pen import JWW_UNITS_PER_METER, JwwDrawing
 
 from ..envelope import EnvelopeResult
 from ..massing import Block
@@ -24,24 +30,16 @@ def _footprint_ring(block: Block) -> list[tuple[float, float]]:
     return list(block.footprint.exterior.coords)
 
 
-def _add_plan(msp, result: EnvelopeResult) -> None:
-    msp.add_lwpolyline(
-        result.site.points, format="xy", close=True, dxfattribs={"layer": "SITE", "color": 250}
-    )
+def _add_plan(pen: JwwDrawing, result: EnvelopeResult) -> None:
+    pen.polyline(result.site.points, "SITE", 250)
     for i, block in enumerate(result.blocks):
         color = PLAN_LAYER_COLORS[i % len(PLAN_LAYER_COLORS)]
-        msp.add_lwpolyline(
-            _footprint_ring(block),
-            format="xy",
-            close=True,
-            dxfattribs={"layer": "ENVELOPE-PLAN", "color": color},
-        )
+        pen.polyline(_footprint_ring(block), "ENVELOPE-PLAN", color)
         label_point = block.footprint.representative_point()
-        msp.add_text(
+        pen.text(
             f"GL+{block.z_bottom:.2f}~{block.z_top:.2f}m",
-            height=0.5,
-            dxfattribs={"layer": "ENVELOPE-PLAN-TEXT", "color": color},
-        ).set_placement((label_point.x, label_point.y))
+            (label_point.x, label_point.y), 0.5, "ENVELOPE-PLAN-TEXT", color,
+        )
 
 
 def _section_cut_line(result: EnvelopeResult, axis: str, position: float | None) -> LineString:
@@ -60,11 +58,11 @@ def _site_bounds(result: EnvelopeResult) -> tuple[float, float, float, float]:
     return min(xs), min(ys), max(xs), max(ys)
 
 
-def _add_section(msp, result: EnvelopeResult, axis: str, position: float | None, offset: tuple[float, float]) -> None:
+def _add_section(pen: JwwDrawing, result: EnvelopeResult, axis: str, position: float | None, offset: tuple[float, float]) -> None:
     cut = _section_cut_line(result, axis, position)
     ox, oy = offset
     ground_u = [cut.project(p) for p in [cut.interpolate(0), cut.interpolate(cut.length)]]
-    msp.add_line((ox + ground_u[0], oy), (ox + ground_u[1], oy), dxfattribs={"layer": "SECTION-GL", "color": 8})
+    pen.line((ox + ground_u[0], oy), (ox + ground_u[1], oy), "SECTION-GL", 8)
 
     for i, block in enumerate(result.blocks):
         inter = block.footprint.intersection(cut)
@@ -84,15 +82,13 @@ def _add_section(msp, result: EnvelopeResult, axis: str, position: float | None,
                 (ox + u1, oy + block.z_top),
                 (ox + u0, oy + block.z_top),
             ]
-            msp.add_lwpolyline(rect, format="xy", close=True, dxfattribs={"layer": "ENVELOPE-SECTION", "color": color})
+            pen.polyline(rect, "ENVELOPE-SECTION", color)
 
 
-def _add_summary_text(msp, result: EnvelopeResult, offset: tuple[float, float]) -> None:
+def _add_summary_text(pen: JwwDrawing, result: EnvelopeResult, offset: tuple[float, float]) -> None:
     ox, oy = offset
     for i, line in enumerate(result.summary_lines()):
-        msp.add_text(line, height=0.6, dxfattribs={"layer": "SUMMARY", "color": 7}).set_placement(
-            (ox, oy - i * 0.9)
-        )
+        pen.text(line, (ox, oy - i * 0.9), 0.6, "SUMMARY", 7)
 
 
 ISO_LAYER_BY_KIND = {
@@ -103,7 +99,7 @@ ISO_LAYER_BY_KIND = {
 
 
 def _add_isometric(
-    msp,
+    pen: JwwDrawing,
     result: EnvelopeResult,
     azimuth_deg: float,
     elevation_deg: float,
@@ -114,7 +110,7 @@ def _add_isometric(
     )
     for p1, p2, kind in segments:
         layer, color = ISO_LAYER_BY_KIND.get(kind, ("ISO-OUTLINE", 2))
-        msp.add_line(p1, p2, dxfattribs={"layer": layer, "color": color})
+        pen.line(p1, p2, layer, color)
 
 
 def write_envelope_dxf(
@@ -124,29 +120,29 @@ def write_envelope_dxf(
     section_position: float | None = None,
     isometric_azimuth_deg: float = 225.0,
     isometric_elevation_deg: float = 30.0,
+    units_per_meter: float = JWW_UNITS_PER_METER,
 ) -> None:
     if section_axis not in ("x", "y"):
         raise ValueError("section_axis must be 'x' or 'y'")
-    doc = ezdxf.new("R2010", setup=False)
+    pen = JwwDrawing(units_per_meter=units_per_meter)
     for name in (
         "SITE", "ENVELOPE-PLAN", "ENVELOPE-PLAN-TEXT", "SECTION-GL", "ENVELOPE-SECTION", "SUMMARY",
         "ISO-SITE", "ISO-OUTLINE", "ISO-VERTICAL",
     ):
-        doc.layers.add(name)
-    msp = doc.modelspace()
+        pen.add_layer(name)
 
     minx, miny, maxx, maxy = _site_bounds(result)
     width, height = maxx - minx, maxy - miny
-    _add_plan(msp, result)
+    _add_plan(pen, result)
 
     section_offset = (maxx + width * 0.2 + 5.0, miny)
-    _add_section(msp, result, section_axis, section_position, section_offset)
+    _add_section(pen, result, section_axis, section_position, section_offset)
 
     summary_offset = (minx, miny - height * 0.15 - 5.0)
-    _add_summary_text(msp, result, summary_offset)
+    _add_summary_text(pen, result, summary_offset)
 
     # アイソメ図は平面図の上側に配置（断面図・サマリーと重ならない位置）
     iso_offset = (minx, maxy + height * 0.2 + 5.0)
-    _add_isometric(msp, result, isometric_azimuth_deg, isometric_elevation_deg, iso_offset)
+    _add_isometric(pen, result, isometric_azimuth_deg, isometric_elevation_deg, iso_offset)
 
-    doc.saveas(path)
+    pen.save(path)
