@@ -45,7 +45,23 @@ mve 敷地.yaml --dxf-units 1
 読み込んだ直後に何も見えないときは、まず **JWWの「全体表示」** を試して
 ください。図形は入っているのに表示範囲が合っていないだけのことがあります。
 
-実装と根拠は `mve/io/dxf_pen.py`、検証は `tests/mve/test_jww_dxf_compat.py`
+### 実機で確認できたこと（2026-08）
+
+実際のJW-CADで表示を確認しました。分かったのは次の2点です。
+
+- **`mve/io/dxf_r12.py`（既定）の出力は表示される。**
+  大文字のテーブル名（`CONTINUOUS`/`STANDARD`）、ハンドルなし、
+  `LTYPE`/`LAYER`/`STYLE` の3表のみ、CRLF、Shift-JIS という構成です。
+- **ezdxf が書くR12は、同じ図面でも表示されない。**
+  R12であっても、小文字混じりのテーブル名・ハンドル（グループコード5）・
+  `VIEW`/`UCS`/`APPID`/`DIMSTYLE`/`VPORT` テーブルが付くためです。
+
+レイヤ19枚でも表示されました。JW-CADのレイヤ上限（1グループ16枚）は、
+DXF読込の可否には影響しません。
+
+切り分けに使ったテストDXFは `tools/make_jww_test_dxf.py` で再生成できます。
+
+実装と根拠は `mve/io/dxf_r12.py`、検証は `tests/mve/test_jww_dxf_compat.py`
 にあります。
 
 ## 方法2: 外部変形として登録
