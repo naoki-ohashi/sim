@@ -80,10 +80,36 @@ def test_closed_shapes_are_actually_closed(dxf):
     assert all(n == 2 for n in counts.values()), counts
 
 
-def test_view_is_zoomed_to_the_drawing(dxf):
-    """開いた直後に図面全体が見えるよう、表示範囲を合わせてある。"""
-    vp = ezdxf.readfile(str(dxf)).viewports.get("*Active")[0]
-    assert vp.dxf.height > 1000.0     # mm。既定の420x297のままではない
+def test_extents_describe_the_drawing(dxf):
+    """図面の範囲($EXTMIN/$EXTMAX)が実際の図形に合っていること。
+
+    読み込んだ側が「全体表示」で図面を画面に収められるようにするためです。
+    既定のr12バックエンドはVPORT表を書かない（JW-CADが苦手なため）ので、
+    範囲はヘッダで伝えます。
+    """
+    doc = ezdxf.readfile(str(dxf))
+    lo, hi = doc.header["$EXTMIN"], doc.header["$EXTMAX"]
+    xs, ys = [], []
+    for e in doc.modelspace():
+        if e.dxftype() == "LINE":
+            xs += [e.dxf.start.x, e.dxf.end.x]
+            ys += [e.dxf.start.y, e.dxf.end.y]
+        elif e.dxftype() == "TEXT":     # 要約の文字は敷地の下に置かれる
+            xs.append(e.dxf.insert.x)
+            ys.append(e.dxf.insert.y)
+    assert lo[0] == pytest.approx(min(xs)) and lo[1] == pytest.approx(min(ys))
+    assert hi[0] == pytest.approx(max(xs)) and hi[1] == pytest.approx(max(ys))
+    assert hi[0] - lo[0] > 1000.0     # mm。実寸1m以上の図面になっている
+
+
+def test_ezdxf_backend_still_zooms_its_viewport(tmp_path):
+    """ezdxfバックエンドの方は、従来どおりVPORTで表示範囲を合わせる。"""
+    from mve.io.drawing import write_dxf as w
+
+    path = tmp_path / "ez.dxf"
+    w(_result(), str(path), backend="ezdxf")
+    vp = ezdxf.readfile(str(path)).viewports.get("*Active")[0]
+    assert vp.dxf.height > 1000.0
 
 
 def test_checker_accepts_our_output(dxf, capsys):
@@ -113,3 +139,74 @@ def test_checker_rejects_the_old_broken_format(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "LWPOLYLINE" in out
     assert "R12" in out
+
+
+# --- 手書きR12ライター（外部ライブラリなし）------------------------------
+
+def test_r12_backend_output_is_readable_and_equivalent(tmp_path):
+    """`backend="r12"` の出力も、ezdxf版と同じ図面になること。"""
+    from mve.io.drawing import write_dxf as w
+
+    a, b = tmp_path / "r12.dxf", tmp_path / "ez.dxf"
+    w(_result(), str(a), backend="r12")
+    w(_result(), str(b), backend="ezdxf")
+
+    def lines(path):
+        return sorted(
+            (round(e.dxf.start.x, 3), round(e.dxf.start.y, 3),
+             round(e.dxf.end.x, 3), round(e.dxf.end.y, 3))
+            for e in ezdxf.readfile(str(path)).modelspace() if e.dxftype() == "LINE")
+
+    assert lines(a) == lines(b)
+
+
+def test_r12_backend_avoids_what_jww_dislikes(tmp_path):
+    """JW-CADが苦手な要素（小文字のテーブル名・ハンドル・余分な表）を出さない。"""
+    from mve.io.drawing import write_dxf as w
+
+    path = tmp_path / "r12.dxf"
+    w(_result(), str(path), backend="r12")
+    raw = path.read_bytes().decode("cp932")
+
+    assert "CONTINUOUS" in raw and "Continuous" not in raw
+    assert "STANDARD" in raw and "Standard" not in raw
+    for table in ("VIEW", "UCS", "APPID", "DIMSTYLE", "VPORT"):
+        assert f"  2\r\n{table}\r\n" not in raw, table
+    import re
+    assert not re.search(r"\r\n  5\r\n[0-9A-F]+\r\n", raw), "ハンドルが残っている"
+    assert raw.endswith("  0\r\nEOF\r\n")
+
+
+def test_r12_layer_names_are_uppercase_and_valid(tmp_path):
+    """R12のレイヤ名は大文字・31文字以内・限られた文字だけ。"""
+    from mve.io.dxf_r12 import R12Drawing
+
+    pen = R12Drawing()
+    pen.line((0, 0), (1, 1), "mve-plan-1")
+    pen.line((0, 0), (1, 1), "変な/名前*です")
+    names = [n for n in pen._layers]
+    assert "MVE-PLAN-1" in names
+    assert all(len(n) <= 31 for n in names)
+    assert all(c.isalnum() or c in "$-_" for n in names for c in n)
+
+
+def test_r12_writer_needs_no_ezdxf(monkeypatch, tmp_path):
+    """ezdxf が無い環境でも書けること（外部ライブラリに依存しない）。"""
+    import builtins
+    from mve.io.dxf_r12 import R12Drawing
+
+    real_import = builtins.__import__
+
+    def blocked(name, *args, **kwargs):
+        if name.startswith("ezdxf"):
+            raise ImportError("ezdxf は無い想定")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", blocked)
+    pen = R12Drawing()
+    pen.polyline([(0, 0), (10, 0), (10, 10)], "SITE")
+    pen.text("日本語", (0, 0), 0.5, "SITE")
+    path = tmp_path / "no_ezdxf.dxf"
+    pen.save(str(path))
+    assert path.stat().st_size > 0
+    assert "日本語".encode("cp932") in path.read_bytes()

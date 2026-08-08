@@ -31,6 +31,8 @@ class OutputSettings:
     draw_floor_labels: bool = True
     #: 図面1mを何単位で書くか。JW-CADはmmなので既定は1000。
     dxf_units_per_meter: float = JWW_UNITS_PER_METER
+    #: 書き出しの実装。r12 = JW-CAD向けの最小構成 / ezdxf = 他CAD互換重視
+    dxf_backend: str = "r12"
 
 
 @dataclass

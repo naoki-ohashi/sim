@@ -28,6 +28,7 @@ from ..optimizer import OptimizeResult
 from ..regulations.shadow import measurement_points, regulation_boundary
 from ..site import Site
 from .dxf_pen import JWW_UNITS_PER_METER, JwwDrawing
+from .dxf_r12 import R12Drawing
 
 LAYERS = {
     "MVE-SITE": 7, "MVE-ROAD": 8, "MVE-SETBACK": 3, "MVE-OUTLINE": 5,
@@ -62,17 +63,29 @@ def _add_north_symbol(pen: JwwDrawing, site: Site, origin: Point, size: float) -
              size * 0.2, "MVE-NORTH", 1)
 
 
+#: 書き出しの実装。`r12` は外部ライブラリを使わない最小構成（JW-CAD向け）。
+BACKENDS = {"ezdxf": JwwDrawing, "r12": R12Drawing}
+
+
 def write_dxf(result: OptimizeResult, path: str, draw_mesh: bool = True,
               draw_floor_labels: bool = True,
-              units_per_meter: float = JWW_UNITS_PER_METER) -> None:
+              units_per_meter: float = JWW_UNITS_PER_METER,
+              backend: str = "r12") -> None:
     """計算結果をDXFに書き出す。
 
     `units_per_meter` は図面1単位が何mにあたるかの逆数です。既定の1000は
     「1m = 1000単位 = mmで作図」の意味で、JW-CADの標準です。mで作図している
     図面に合わせたい場合だけ 1 を指定してください。
+
+    `backend` は書き出しの実装です。既定の `r12` は外部ライブラリを使わず、
+    JW-CADが解釈できる範囲だけを組み立てます（`dxf_r12.py`）。`ezdxf` は
+    ezdxf が書くR12で、他のCADとの互換性は高いぶんJW-CADには読みにくい
+    要素（大文字でないテーブル名・ハンドル・余分なテーブル）が入ります。
     """
+    if backend not in BACKENDS:
+        raise ValueError(f"backend は {'/'.join(BACKENDS)} のいずれかにしてください")
     site = result.site
-    pen = JwwDrawing(units_per_meter=units_per_meter)
+    pen = BACKENDS[backend](units_per_meter=units_per_meter)
     for name, color in LAYERS.items():
         pen.add_layer(name, color)
 
