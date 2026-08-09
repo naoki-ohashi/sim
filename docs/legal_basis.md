@@ -9,7 +9,7 @@
 | 道路斜線制限 | `regulations/road_slant.py` | 建築基準法56条1項1号、施行令130条の11（別表第三：適用距離・勾配）、施行令130条の12（後退緩和） |
 | 隣地斜線制限 | `regulations/adjacent_slant.py` | 建築基準法56条1項2号、施行令135条の3（後退緩和） |
 | 北側斜線制限 | `regulations/north_slant.py` | 建築基準法56条1項3号、施行令135条の4（後退緩和） |
-| 天空率算定 | `regulations/sky_ratio.py`, `regulations/reference_building.py` | 建築基準法56条7項、施行令135条の5～9（適合建築物・測定点・天空率算定方法） |
+| 天空率算定 | `regulations/sky_ratio.py`, `regulations/reference_building.py` | 建築基準法56条7項、施行令135条の5～11（天空率の定義・適用建築物の基準・測定位置） |
 | 日影規制 | `regulations/shadow.py` | 建築基準法56条の2、施行令135条の12・13（測定面・測定時間・平均地盤面） |
 | 絶対高さ制限 | `site.py` の `ZoningParams.absolute_height_limit_m` | 建築基準法55条（第一種・第二種低層住居専用地域、田園住居地域） |
 | 容積率・建蔽率 | `site.py` の `max_total_floor_area_m2` / `max_building_area_m2` | 建築基準法52条・53条 |
