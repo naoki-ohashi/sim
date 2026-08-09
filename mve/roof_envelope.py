@@ -46,6 +46,22 @@
 インデックス上の判定に加えて、`regulations.shadow.compute_shadow_hours`
 （shapely を使う独立した実装）で必ず再確認します
 （`tests/mve/test_roof_envelope.py`）。天空率で行った検証と同じ考え方です。
+
+## 天空率との同時最適化
+
+`sky_index` を渡すと、棟高の二分探索が**日影と天空率の両方**を条件にします
+（`optimizer.py` の従来の実装は、屋根形状で日影を解消したあとに天空率だけを
+自由形で別途削る2段階でした。これだと天空率の是正が屋根の規則正しい形を
+崩してしまいます）。
+
+候補（方位・棟位置・両側の勾配）ごとに、**日影と天空率の両方が適合する
+棟高**を二分探索で求め、その中で延床面積が最大のものを採用します。
+下げる操作はどちらの適合にも悪影響を与えないため（単調性）、二分探索は
+天空率単独のときと同じ理屈で安全に行えます。
+
+離散的な候補の中に両方を満たす組み合わせが1つも無い場合は、**日影だけを
+満たす形に戻します**（`sky_ratio_included=False`）。この場合、天空率の
+是正は呼び出し側（`optimizer.py`）が別途フリーフォームで行います。
 """
 from __future__ import annotations
 
@@ -59,6 +75,7 @@ from .mesh import BuildableArea
 from .regulations.shadow import ShadowRegulationSpec
 from .shadow_index import ShadowIndex, build_shadow_index
 from .site import Site
+from .sky_index import SkyIndex
 
 #: 棟の向きを探索する範囲（臨界方位を中心に ±この角度）
 DEFAULT_ANGLE_SPAN_DEG = 15.0
@@ -102,6 +119,8 @@ class RoofPlaneSpec:
 class RoofSearchResult:
     spec: RoofPlaneSpec | None       # 屋根形状なしで既に適合していれば None
     floors: np.ndarray
+    #: 天空率も同じ棟高で満たしたか（False なら別途フリーフォームの是正が要る）
+    sky_ratio_included: bool = False
     notes: list[str] = field(default_factory=list)
 
 
@@ -162,30 +181,94 @@ def _best_ridge_height(
     index: ShadowIndex, lo: float, hi: float, base_floors: np.ndarray, floor_h: float,
     centers: np.ndarray, low_normal: Point, ridge_point: np.ndarray,
     pitch_near_deg: float, pitch_far_deg: float, steps: int,
+    sky_index: SkyIndex | None = None,
 ) -> tuple[float, np.ndarray] | None:
     """棟高を hi から下げていき、適合する最大の棟高を二分探索で求める。
 
     棟を下げるほど各マスの高さ上限は単調に下がる（または変わらない）ので、
     日影の適合状態も単調に改善する（悪化しない）。この単調性が二分探索の
-    前提になっている。
+    前提になっている。`sky_index` を渡すと、**日影と天空率の両方**が適合
+    する棟高を探す（天空率も同じ理由で単調なので、そのまま条件に加えられる）。
     """
     def floors_at(h: float) -> np.ndarray:
         return _max_floors_for_ridge_height(
             h, base_floors, floor_h, centers, low_normal, ridge_point,
             pitch_near_deg, pitch_far_deg)
 
-    if index.is_compliant(floors_at(hi) * floor_h):
+    def compliant(h: float) -> bool:
+        heights = floors_at(h) * floor_h
+        if not index.is_compliant(heights):
+            return False
+        return sky_index is None or sky_index.is_compliant(heights)
+
+    if compliant(hi):
         return hi, floors_at(hi)
-    if not index.is_compliant(floors_at(lo) * floor_h):
+    if not compliant(lo):
         return None    # 最も低くしても適合しない＝この形状では無理
 
     for _ in range(steps):
         mid = (lo + hi) / 2.0
-        if index.is_compliant(floors_at(mid) * floor_h):
+        if compliant(mid):
             lo = mid
         else:
             hi = mid
     return lo, floors_at(lo)
+
+
+def _search_ridge_candidates(
+    site: Site, area: BuildableArea, index: ShadowIndex,
+    base_floors: np.ndarray, floor_h: float, pattern: str,
+    center_azimuth: float, critical_azimuth: float | None,
+    angle_span_deg: float, angle_step_deg: float, offset_steps: int,
+    pitch_candidates_deg: tuple, far_pitch_candidates_deg: tuple,
+    height_bisection_steps: int, fixed_low_azimuth_deg: float | None,
+    sky_index: SkyIndex | None,
+) -> tuple[float, RoofPlaneSpec, np.ndarray] | None:
+    """棟の向き・位置・両側の勾配を総当たりし、延床面積が最大の組み合わせを返す。"""
+    centers = np.array([c.center for c in area.cells])
+    outline_centroid = np.array(area.outline.centroid.coords[0])
+    max_h = float(base_floors.max()) * floor_h
+
+    angle_offsets = ([0.0] if fixed_low_azimuth_deg is not None else
+                     list(np.arange(-angle_span_deg, angle_span_deg + 1e-6, angle_step_deg)))
+    far_pitches = (0.0,) if pattern == "lean_to" else far_pitch_candidates_deg
+
+    best: tuple[float, RoofPlaneSpec, np.ndarray] | None = None
+    for da in angle_offsets:
+        low_azimuth = (center_azimuth + da) % 360.0
+        low_normal = np.array(_low_normal(site, low_azimuth))
+        s_all = (centers - outline_centroid) @ low_normal
+
+        if pattern == "lean_to":
+            # 棟を外郭線の外側まで押し出し、全マスを低勾配側にする
+            offsets = [float(s_all.min()) - 1.0]
+        else:
+            smin, smax = float(s_all.min()), float(s_all.max())
+            offsets = [smin] if smax <= smin else list(np.linspace(smin, smax, offset_steps))
+
+        for offset in offsets:
+            ridge_point = outline_centroid + offset * low_normal
+            for pitch_near in pitch_candidates_deg:
+                for pitch_far in far_pitches:
+                    result = _best_ridge_height(
+                        index, 0.0, max_h, base_floors, floor_h, centers, low_normal,
+                        ridge_point, pitch_near, pitch_far, height_bisection_steps,
+                        sky_index=sky_index)
+                    if result is None:
+                        continue
+                    ridge_height, floors = result
+                    area_m2 = float(sum(
+                        floors[i] * area.cells[i].area_m2 for i in range(len(area.cells))))
+                    if best is None or area_m2 > best[0]:
+                        spec = RoofPlaneSpec(
+                            pattern=pattern, low_azimuth_deg=low_azimuth,
+                            ridge_offset_m=offset,
+                            pitch_near_deg=pitch_near, pitch_far_deg=pitch_far,
+                            ridge_height_m=ridge_height,
+                            critical_azimuth_deg=critical_azimuth,
+                        )
+                        best = (area_m2, spec, floors)
+    return best
 
 
 def search_roof_envelope(
@@ -198,12 +281,18 @@ def search_roof_envelope(
     far_pitch_candidates_deg: tuple = DEFAULT_FAR_PITCH_CANDIDATES_DEG,
     height_bisection_steps: int = DEFAULT_HEIGHT_BISECTION_STEPS,
     fixed_low_azimuth_deg: float | None = None,
+    sky_index: SkyIndex | None = None,
 ) -> RoofSearchResult:
     """屋根越しパターン・棟状パターンで、日影規制に適合する最大容積を探す。
 
     `base_floors` は斜線制限・建蔽率・容積率までを適用した後の階数配列
     （`optimizer.optimize` のステップ1〜3の結果）。ここからさらに、屋根形状
     による規則正しい後退だけで日影規制を満たす形に絞り込みます。
+
+    `sky_index` を渡すと、**日影と天空率を同時に満たす**棟高だけを探します
+    （モジュールdocstringの「天空率との同時最適化」を参照）。候補の中に
+    両方を満たすものが無かった場合は、日影だけを満たす形に戻します
+    （`RoofSearchResult.sky_ratio_included=False`）。
     """
     if pattern not in ("lean_to", "ridge"):
         raise ValueError('pattern は "lean_to" か "ridge" にしてください')
@@ -225,58 +314,41 @@ def search_roof_envelope(
     center_azimuth = (fixed_low_azimuth_deg if fixed_low_azimuth_deg is not None
                       else (critical_azimuth + 180.0) % 360.0)
 
-    centers = np.array([c.center for c in area.cells])
-    outline_centroid = np.array(area.outline.centroid.coords[0])
-    max_h = float(base_floors.max()) * floor_h
+    common_args = dict(
+        site=site, area=area, index=index, base_floors=base_floors, floor_h=floor_h,
+        pattern=pattern, center_azimuth=center_azimuth, critical_azimuth=critical_azimuth,
+        angle_span_deg=angle_span_deg, angle_step_deg=angle_step_deg,
+        offset_steps=offset_steps, pitch_candidates_deg=pitch_candidates_deg,
+        far_pitch_candidates_deg=far_pitch_candidates_deg,
+        height_bisection_steps=height_bisection_steps,
+        fixed_low_azimuth_deg=fixed_low_azimuth_deg,
+    )
 
-    angle_offsets = ([0.0] if fixed_low_azimuth_deg is not None else
-                     list(np.arange(-angle_span_deg, angle_span_deg + 1e-6, angle_step_deg)))
-    far_pitches = (0.0,) if pattern == "lean_to" else far_pitch_candidates_deg
+    if sky_index is not None:
+        best = _search_ridge_candidates(sky_index=sky_index, **common_args)
+        if best is not None:
+            _area_m2, spec, floors = best
+            return RoofSearchResult(spec, floors, sky_ratio_included=True)
+        # 両方を満たす組み合わせが候補の中に無かった。日影だけを満たす形に
+        # 戻し、天空率は呼び出し側のフリーフォームの是正に任せる。
+        best = _search_ridge_candidates(sky_index=None, **common_args)
+        if best is None:
+            return RoofSearchResult(
+                None, np.zeros(len(area.cells), dtype=int),
+                notes=["屋根形状のどの候補でも日影規制を満たせませんでした。"
+                      "メッシュを細かくするか、階高・敷地条件を見直してください。"])
+        _area_m2, spec, floors = best
+        return RoofSearchResult(spec, floors, sky_ratio_included=False, notes=[
+            "屋根形状の候補の中に、日影と天空率を同時に満たすものがありませんでした。"
+            "日影だけを満たす形にしたうえで、天空率は個別のマスの調整で対応します"
+            "（屋根の規則正しい形が一部崩れることがあります）。"
+        ])
 
-    best: tuple[float, RoofPlaneSpec, np.ndarray] | None = None
-    for da in angle_offsets:
-        low_azimuth = (center_azimuth + da) % 360.0
-        low_normal = np.array(_low_normal(site, low_azimuth))
-        s_centroid = 0.0   # 重心を原点に、oxsetをsの単位（m）で直接指定する
-        s_all = (centers - outline_centroid) @ low_normal
-
-        if pattern == "lean_to":
-            # 棟を外郭線の外側まで押し出し、全マスを低勾配側にする
-            offsets = [float(s_all.min()) - 1.0]
-        else:
-            smin, smax = float(s_all.min()), float(s_all.max())
-            if smax <= smin:
-                offsets = [smin]
-            else:
-                offsets = list(np.linspace(smin, smax, offset_steps))
-
-        for offset in offsets:
-            ridge_point = outline_centroid + offset * low_normal
-            for pitch_near in pitch_candidates_deg:
-                for pitch_far in far_pitches:
-                    result = _best_ridge_height(
-                        index, 0.0, max_h, base_floors, floor_h, centers, low_normal,
-                        ridge_point, pitch_near, pitch_far, height_bisection_steps)
-                    if result is None:
-                        continue
-                    ridge_height, floors = result
-                    area_m2 = float(sum(
-                        floors[i] * area.cells[i].area_m2 for i in range(len(area.cells))))
-                    if best is None or area_m2 > best[0]:
-                        spec = RoofPlaneSpec(
-                            pattern=pattern, low_azimuth_deg=low_azimuth,
-                            ridge_offset_m=offset,   # 外郭線の重心から low_azimuth 方向への符号付き距離
-                            pitch_near_deg=pitch_near, pitch_far_deg=pitch_far,
-                            ridge_height_m=ridge_height,
-                            critical_azimuth_deg=critical_azimuth,
-                        )
-                        best = (area_m2, spec, floors)
-
+    best = _search_ridge_candidates(sky_index=None, **common_args)
     if best is None:
         return RoofSearchResult(
             None, np.zeros(len(area.cells), dtype=int),
             notes=["屋根形状のどの候補でも日影規制を満たせませんでした。"
                   "メッシュを細かくするか、階高・敷地条件を見直してください。"])
-
     _area_m2, spec, floors = best
     return RoofSearchResult(spec, floors)

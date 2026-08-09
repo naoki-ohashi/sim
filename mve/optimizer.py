@@ -13,18 +13,24 @@
    このとき「積める階数が多いマス」を優先して残すので、同じ建築面積でも
    容積を大きく取れます。
 3. **容積率で頭打ち**: 延床面積の上限を超えないよう、上の階から削ります。
-4. **日影規制に合わせる**: 既定（`envelope_family: "voxel"`）は、超過している
+4・5. **日影規制と天空率に合わせる**: `use_sky_ratio` を使わない場合は日影
+   規制だけを見ます。既定（`envelope_family: "voxel"`）は、超過している
    測定点について**その点を実際に日影にしているマスだけ**を特定して下げる
    自由形です。建物全体を一律に低くするようなことはしません。
    `envelope_family: "lean_to" | "ridge"` にすると、代わりに**逆日影**
    （屋根越し・棟状パターン）で規則正しい1〜2枚の勾配面に沿って後退させます
    （`roof_envelope.py`）。容積は自由形よりやや少なくなりますが、結果が
    建築的に成立する量塊になります。
-5. **天空率に合わせる**（`use_sky_ratio` のときだけ）: 斜線制限を外した
-   代わりに Ps ≧ Pr を確認し、足りない測定点について**稜線を作っている
-   マスだけ**を下げます（`sky_index.py`）。
+
+   日影と天空率を**両方**使う場合は、順に解決するのではなく**同時に**
+   動かします。voxel では1手ずつ交互に解消し（`_resolve_shadow_and_sky_jointly`）、
+   lean_to/ridge では棟の探索そのものが両方の適合を条件にします
+   （`roof_envelope.py` の「天空率との同時最適化」）。片方を先に解消し
+   切ってから他方に移ると、一方の是正がもう一方も満たしていたことに
+   気づけず、削り込みが重複する場合があるためです。
 6. **積み直す**: 4・5で削った結果あいた容積率の余地に、規制を満たす範囲で
-   積み直します。
+   積み直します（voxelのときだけ。屋根形状パターンでは規則正しい形を
+   崩さないよう行いません）。
 
 ## 4・5がこの実装の要点
 
@@ -104,6 +110,9 @@ class OptimizeResult:
     sky_ratio: SkyRatioSummary | None = None
     #: lean_to/ridge を使ったときの屋根形状。voxel（既定）では None。
     roof_spec: RoofPlaneSpec | None = None
+    #: 屋根形状が天空率も同じ棟高で満たしたか（True なら追加のフリーフォーム
+    #: 是正は無し＝完全に規則正しい形のまま）。roof_spec が None なら意味を持たない。
+    roof_includes_sky_ratio: bool = False
     notes: list[str] = field(default_factory=list)
 
     # --- 集計 -------------------------------------------------------
@@ -177,7 +186,8 @@ class OptimizeResult:
             binding.append("天空率")
         lines.append("上限に達した規制: " + ("・".join(binding) if binding else "なし"))
         if self.roof_spec is not None:
-            lines.append(f"　逆日影: {self.roof_spec.describe_ja()}")
+            tail = "（天空率も同じ棟高で同時に満たしています）" if self.roof_includes_sky_ratio else ""
+            lines.append(f"　逆日影: {self.roof_spec.describe_ja()}{tail}")
         if self.shadow_limited:
             lines.append(f"　日影規制で削った体積: {self.volume_removed_by_shadow_m3:.1f} m3")
         if self.sky_ratio_limited:
@@ -248,6 +258,69 @@ def _apply_far_cap(area: BuildableArea, floors: np.ndarray, max_floor_area_m2: f
     return True
 
 
+def _shadow_step(
+    area: BuildableArea, floors: np.ndarray, index: ShadowIndex, floor_height_m: float,
+) -> tuple[bool, float, str | None, bool]:
+    """日影規制の是正を1手だけ進める（最も超過している測定点を1つ解消する）。
+
+    戻り値は (何か直したか, 削った体積, 追記するメモ, 完全に解消したか)。
+    `_resolve_shadow` と `_resolve_shadow_and_sky_jointly` の両方から使う、
+    最小の作業単位です。
+    """
+    cell_areas = np.array([c.area_m2 for c in area.cells])
+    heights = floors * floor_height_m
+    worst = index.worst(heights)
+    if worst is None:
+        return False, 0.0, None, True
+
+    distance, point_index, hours, excess = worst
+    limit = (index.spec.line_5m_max_hours if distance == 5.0
+             else index.spec.line_10m_max_hours)
+
+    thresh = index.thresholds[distance][point_index]      # (時刻, マス)
+    shadowed_now = (heights[None, :] >= thresh)           # 各時刻のマス別判定
+    active_times = np.where(shadowed_now.any(axis=1))[0]
+    if active_times.size == 0:
+        return False, 0.0, None, False
+
+    # 解消しなければならない時刻数
+    need = int(math.ceil((hours - limit) / index.step_hours - 1e-9))
+    if need <= 0:
+        return False, 0.0, None, False
+
+    # 時刻ごとの解消コスト（その時刻の影を消すために失う体積）
+    costs = []
+    for ti in active_times:
+        offenders = np.where(shadowed_now[ti])[0]
+        cost = 0.0
+        plan = []
+        for ci in offenders:
+            # しきい値をわずかに下回る階数まで下げる
+            target_floors = int(math.floor((thresh[ti, ci] - 1e-6) / floor_height_m))
+            target_floors = max(0, min(target_floors, int(floors[ci])))
+            drop = int(floors[ci]) - target_floors
+            if drop > 0:
+                cost += drop * float(cell_areas[ci]) * floor_height_m
+                plan.append((ci, target_floors))
+        if plan:
+            costs.append((cost, ti, plan))
+
+    if not costs:
+        return False, 0.0, (
+            "日影規制を満たすためにマスを下げようとしましたが、"
+            "これ以上下げられる柱がありません（メッシュを細かくすると改善する場合があります）。"
+        ), False
+
+    costs.sort(key=lambda c: c[0])
+    removed = 0.0
+    for cost, _ti, plan in costs[:need]:
+        for ci, target_floors in plan:
+            if floors[ci] > target_floors:
+                removed += (floors[ci] - target_floors) * cell_areas[ci] * floor_height_m
+                floors[ci] = target_floors
+    return True, removed, None, False
+
+
 def _resolve_shadow(
     area: BuildableArea, floors: np.ndarray, index: ShadowIndex,
     floor_height_m: float, max_iterations: int,
@@ -256,62 +329,19 @@ def _resolve_shadow(
 
     戻り値は (日影が制約になったか, 削った体積, メモ)。
     """
-    cell_areas = np.array([c.area_m2 for c in area.cells])
     removed_volume = 0.0
     touched = False
     notes: list[str] = []
 
     for _ in range(max_iterations):
-        heights = floors * floor_height_m
-        worst = index.worst(heights)
-        if worst is None:
+        acted, removed, note, done = _shadow_step(area, floors, index, floor_height_m)
+        if note:
+            notes.append(note)
+        if acted:
+            touched = True
+            removed_volume += removed
+        if done or not acted:
             break
-        touched = True
-        distance, point_index, hours, excess = worst
-        limit = (index.spec.line_5m_max_hours if distance == 5.0
-                 else index.spec.line_10m_max_hours)
-
-        thresh = index.thresholds[distance][point_index]      # (時刻, マス)
-        shadowed_now = (heights[None, :] >= thresh)           # 各時刻のマス別判定
-        active_times = np.where(shadowed_now.any(axis=1))[0]
-        if active_times.size == 0:
-            break
-
-        # 解消しなければならない時刻数
-        need = int(math.ceil((hours - limit) / index.step_hours - 1e-9))
-        if need <= 0:
-            break
-
-        # 時刻ごとの解消コスト（その時刻の影を消すために失う体積）
-        costs = []
-        for ti in active_times:
-            offenders = np.where(shadowed_now[ti])[0]
-            cost = 0.0
-            plan = []
-            for ci in offenders:
-                # しきい値をわずかに下回る階数まで下げる
-                target_floors = int(math.floor((thresh[ti, ci] - 1e-6) / floor_height_m))
-                target_floors = max(0, min(target_floors, int(floors[ci])))
-                drop = int(floors[ci]) - target_floors
-                if drop > 0:
-                    cost += drop * float(cell_areas[ci]) * floor_height_m
-                    plan.append((ci, target_floors))
-            if plan:
-                costs.append((cost, ti, plan))
-
-        if not costs:
-            notes.append(
-                "日影規制を満たすためにマスを下げようとしましたが、"
-                "これ以上下げられる柱がありません（メッシュを細かくすると改善する場合があります）。"
-            )
-            break
-
-        costs.sort(key=lambda c: c[0])
-        for cost, _ti, plan in costs[:need]:
-            for ci, target_floors in plan:
-                if floors[ci] > target_floors:
-                    removed_volume += (floors[ci] - target_floors) * cell_areas[ci] * floor_height_m
-                    floors[ci] = target_floors
     else:
         notes.append(
             f"日影規制の解消が{max_iterations}回の調整で収束しませんでした。"
@@ -319,6 +349,45 @@ def _resolve_shadow(
         )
 
     return touched, removed_volume, notes
+
+
+def _sky_step(
+    area: BuildableArea, floors: np.ndarray, index: SkyIndex, floor_height_m: float,
+) -> tuple[bool, float, str | None, bool]:
+    """天空率の是正を1手だけ進める（稜線を作っているマスを1階だけ下げる）。
+
+    戻り値は (何か直したか, 削った体積, 追記するメモ, 完全に解消したか)。
+    """
+    cell_areas = np.array([c.area_m2 for c in area.cells])
+    heights = floors * floor_height_m
+    worst = index.worst(heights)
+    if worst is None:
+        return False, 0.0, None, True
+
+    point_index, ps_now, _deficit = worst
+    candidates = [c for c in index.ridge_cells(point_index, heights) if floors[c] > 0]
+    best = None
+    for ci in candidates:
+        trial = heights.copy()
+        trial[ci] -= floor_height_m
+        gain = index.ps_at(point_index, trial) - ps_now
+        if gain <= 1e-12:
+            continue
+        cost = float(cell_areas[ci]) * floor_height_m
+        score = gain / cost if cost > 0 else 0.0
+        if best is None or score > best[0]:
+            best = (score, ci, cost)
+
+    if best is None:
+        return False, 0.0, (
+            "天空率を満たすためにマスを下げようとしましたが、"
+            "これ以上下げても改善しませんでした（壁面後退距離を増やすと"
+            "適合しやすくなります）。"
+        ), False
+
+    _score, ci, cost = best
+    floors[ci] -= 1
+    return True, cost, None, False
 
 
 def _resolve_sky_ratio(
@@ -334,43 +403,19 @@ def _resolve_sky_ratio(
 
     戻り値は (天空率が制約になったか, 削った体積, メモ)。
     """
-    cell_areas = np.array([c.area_m2 for c in area.cells])
     removed_volume = 0.0
     touched = False
     notes: list[str] = []
 
     for _ in range(max_iterations):
-        heights = floors * floor_height_m
-        worst = index.worst(heights)
-        if worst is None:
+        acted, removed, note, done = _sky_step(area, floors, index, floor_height_m)
+        if note:
+            notes.append(note)
+        if acted:
+            touched = True
+            removed_volume += removed
+        if done or not acted:
             break
-        touched = True
-        point_index, ps_now, _deficit = worst
-
-        candidates = [c for c in index.ridge_cells(point_index, heights) if floors[c] > 0]
-        best = None
-        for ci in candidates:
-            trial = heights.copy()
-            trial[ci] -= floor_height_m
-            gain = index.ps_at(point_index, trial) - ps_now
-            if gain <= 1e-12:
-                continue
-            cost = float(cell_areas[ci]) * floor_height_m
-            score = gain / cost if cost > 0 else 0.0
-            if best is None or score > best[0]:
-                best = (score, ci, cost)
-
-        if best is None:
-            notes.append(
-                "天空率を満たすためにマスを下げようとしましたが、"
-                "これ以上下げても改善しませんでした（壁面後退距離を増やすと"
-                "適合しやすくなります）。"
-            )
-            break
-
-        _score, ci, cost = best
-        floors[ci] -= 1
-        removed_volume += cost
     else:
         notes.append(
             f"天空率の解消が{max_iterations}回の調整で収束しませんでした。"
@@ -378,6 +423,63 @@ def _resolve_sky_ratio(
         )
 
     return touched, removed_volume, notes
+
+
+def _resolve_shadow_and_sky_jointly(
+    area: BuildableArea, floors: np.ndarray,
+    shadow_index: ShadowIndex, sky_index: SkyIndex,
+    floor_height_m: float, max_iterations: int,
+) -> tuple[bool, float, bool, float, list[str]]:
+    """日影と天空率を**1手ずつ交互に**解消する（両方を同時に動かす1本の探索）。
+
+    従来は「日影をすべて解消してから天空率をすべて解消する」という2段階
+    でした。この順番だと、日影の是正で下げた1手が天空率もついでに満たして
+    いたとしても、それが分かるのは天空率のフェーズに入ってからで、既に
+    別のマスを下げて払ってしまった分は戻せません（逆に天空率が先でも同様）。
+
+    1手ずつ交互に進めれば、次の手を選ぶときには常に**両方の最新の状態**を
+    見て判断できます。どちらの手も高さを**下げる**方向にしか動かさないので、
+    片方の是正がもう片方を悪化させることはありません
+    （`shadow_index.py` / `sky_index.py` の単調性）。これが交互に進めても
+    安全な理由です。
+
+    戻り値は (日影が制約になったか, 日影で削った体積,
+             天空率が制約になったか, 天空率で削った体積, メモ)。
+    """
+    removed_shadow = 0.0
+    removed_sky = 0.0
+    shadow_touched = False
+    sky_touched = False
+    shadow_done = False
+    sky_done = False
+    notes: list[str] = []
+
+    for _ in range(max_iterations):
+        if shadow_done and sky_done:
+            break
+        if not shadow_done:
+            acted, removed, note, done = _shadow_step(area, floors, shadow_index, floor_height_m)
+            if note:
+                notes.append(note)
+            if acted:
+                shadow_touched = True
+                removed_shadow += removed
+            shadow_done = done or not acted
+        if not sky_done:
+            acted, removed, note, done = _sky_step(area, floors, sky_index, floor_height_m)
+            if note:
+                notes.append(note)
+            if acted:
+                sky_touched = True
+                removed_sky += removed
+            sky_done = done or not acted
+    else:
+        notes.append(
+            f"日影規制・天空率の同時解消が{max_iterations}回の調整で収束しませんでした。"
+            "メッシュを粗くするか、条件を見直してください。"
+        )
+
+    return shadow_touched, removed_shadow, sky_touched, removed_sky, notes
 
 
 def _floors_to_blocks(area: BuildableArea, floors: np.ndarray, floor_height_m: float) -> list[Block]:
@@ -456,17 +558,31 @@ def optimize(
     # 3. 容積率
     far_limited = _apply_far_cap(area, floors, site.max_total_floor_area_m2())
 
-    # 4. 日影規制
+    # 4・5. 日影規制と天空率
     shadow_index = None
+    sky_index = None
     shadow_limited = False
+    sky_limited = False
     removed = 0.0
+    removed_sky = 0.0
     roof_spec: RoofPlaneSpec | None = None
+    roof_includes_sky_ratio = False
     use_roof_pattern = opt.envelope_family != "voxel"
+    has_shadow = shadow_spec is not None and floors.any()
+    has_sky = opt.use_sky_ratio and floors.any()
 
-    if shadow_spec is not None and floors.any():
-        if use_roof_pattern:
-            # 屋根越し／棟状パターン：規則正しい1〜2枚の勾配面で後退させる
+    if use_roof_pattern:
+        if has_shadow:
+            # 屋根越し／棟状パターン：規則正しい1〜2枚の勾配面で後退させる。
+            # 天空率も同時に使う場合は、同じ棟の探索に天空率の適合も条件として
+            # 加える（roof_envelope.py の「天空率との同時最適化」）。1本の探索で
+            # 両方満たせなければ、日影だけを満たす形に戻し、天空率は後段で
+            # フリーフォームに補う。
             before = floors.copy()
+            if has_sky:
+                sky_index = build_sky_index(
+                    site, area, interval_m=opt.sky_ratio_interval_m,
+                    n_azimuth=opt.sky_ratio_n_azimuth)
             roof_result = search_roof_envelope(
                 site, area, shadow_spec, floors, floor_h,
                 pattern=opt.envelope_family,
@@ -476,34 +592,55 @@ def optimize(
                 pitch_candidates_deg=opt.roof_pitch_candidates_deg,
                 far_pitch_candidates_deg=opt.roof_far_pitch_candidates_deg,
                 fixed_low_azimuth_deg=opt.roof_fixed_low_azimuth_deg,
+                sky_index=sky_index,
             )
             floors = roof_result.floors
             roof_spec = roof_result.spec
+            roof_includes_sky_ratio = roof_result.sky_ratio_included
             shadow_limited = roof_spec is not None
             cell_areas = np.array([c.area_m2 for c in area.cells])
             removed = float(((before - floors) * cell_areas).sum()) * floor_h
             notes.extend(roof_result.notes)
-        else:
-            # ボクセル自由形：超過している測定点ごとに、原因となるマスだけを下げる
+        elif has_sky:
+            sky_index = build_sky_index(
+                site, area, interval_m=opt.sky_ratio_interval_m,
+                n_azimuth=opt.sky_ratio_n_azimuth)
+
+        # 天空率がまだ解消されていなければ（日影の指定が無かった、または
+        # 屋根形状の探索が両立する組み合わせを見つけられなかった）フリー
+        # フォームで補う。屋根形状が既に両立している場合はここを飛ばす。
+        if has_sky and sky_index is not None and not roof_includes_sky_ratio and floors.any():
+            sky_limited, removed_sky, sky_notes = _resolve_sky_ratio(
+                area, floors, sky_index, floor_h, opt.max_iterations)
+            notes.extend(sky_notes)
+
+    elif has_shadow and has_sky:
+        # ボクセル自由形：日影と天空率を**1手ずつ交互に**解消する（両方を
+        # 同時に動かす1本の探索）。片方を先に解消し切ってから他方に移ると、
+        # 一方の是正がもう一方も満たしていた場合の重複した削り込みに
+        # 気づけない（`_resolve_shadow_and_sky_jointly` のdocstring参照）。
+        shadow_index = build_shadow_index(site, area, shadow_spec)
+        sky_index = build_sky_index(
+            site, area, interval_m=opt.sky_ratio_interval_m,
+            n_azimuth=opt.sky_ratio_n_azimuth)
+        shadow_limited, removed, sky_limited, removed_sky, joint_notes = (
+            _resolve_shadow_and_sky_jointly(
+                area, floors, shadow_index, sky_index, floor_h, opt.max_iterations))
+        notes.extend(joint_notes)
+
+    else:
+        if has_shadow:
             shadow_index = build_shadow_index(site, area, shadow_spec)
             shadow_limited, removed, shadow_notes = _resolve_shadow(
                 area, floors, shadow_index, floor_h, opt.max_iterations)
             notes.extend(shadow_notes)
-
-    # 5. 天空率（斜線制限に代えて適合させる場合のみ）
-    #    下げる方向の操作なので、ここで日影が悪化することはない。
-    sky_index = None
-    sky_limited = False
-    removed_sky = 0.0
-    if opt.use_sky_ratio and floors.any():
-        sky_index = build_sky_index(
-            site, area,
-            interval_m=opt.sky_ratio_interval_m,
-            n_azimuth=opt.sky_ratio_n_azimuth,
-        )
-        sky_limited, removed_sky, sky_notes = _resolve_sky_ratio(
-            area, floors, sky_index, floor_h, opt.max_iterations)
-        notes.extend(sky_notes)
+        if has_sky:
+            sky_index = build_sky_index(
+                site, area, interval_m=opt.sky_ratio_interval_m,
+                n_azimuth=opt.sky_ratio_n_azimuth)
+            sky_limited, removed_sky, sky_notes = _resolve_sky_ratio(
+                area, floors, sky_index, floor_h, opt.max_iterations)
+            notes.extend(sky_notes)
 
     # 6. 削った結果あいた容積率の余地に積み直す（日影・天空率の両方を守る）
     #    屋根形状パターンでは行わない。積み直すと規則正しい形が崩れるうえ、
@@ -531,7 +668,8 @@ def optimize(
         shadow_limited=shadow_limited, sky_ratio_limited=sky_limited,
         volume_removed_by_shadow_m3=removed,
         volume_removed_by_sky_ratio_m3=removed_sky,
-        sky_ratio=sky_summary, roof_spec=roof_spec, notes=notes,
+        sky_ratio=sky_summary, roof_spec=roof_spec,
+        roof_includes_sky_ratio=roof_includes_sky_ratio, notes=notes,
     )
 
 
