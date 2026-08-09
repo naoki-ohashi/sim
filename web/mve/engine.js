@@ -334,16 +334,33 @@
     return offsetPolygonByEdgeDistances(site.points, distances);
   }
 
-  // 凸多角形で矩形を切った面積（メッシュのマスが外郭線にどれだけ入るか）
-  function clippedArea(rect, outline) {
+  // 凸多角形で矩形を切った形（メッシュのマスのうち外郭線に入っている部分）
+  function clipToOutline(rect, outline) {
     let poly = rect;
     const ring = ensureCCW(outline);
     for (let i = 0; i < ring.length; i++) {
       const p1 = ring[i], p2 = ring[(i + 1) % ring.length];
       poly = clipByHalfPlane(poly, p1, interiorNormal(p1, p2));
-      if (poly.length < 3) return 0;
+      if (poly.length < 3) return [];
     }
-    return polygonArea(poly);
+    return poly;
+  }
+
+  function centroidOf(poly) {
+    const a2 = polygonSignedArea(poly) * 2;
+    if (Math.abs(a2) < 1e-12) {
+      let sx = 0, sy = 0;
+      for (const p of poly) { sx += p[0]; sy += p[1]; }
+      return [sx / poly.length, sy / poly.length];
+    }
+    let cx = 0, cy = 0;
+    for (let i = 0; i < poly.length; i++) {
+      const p = poly[i], q = poly[(i + 1) % poly.length];
+      const cross = p[0] * q[1] - q[0] * p[1];
+      cx += (p[0] + q[0]) * cross;
+      cy += (p[1] + q[1]) * cross;
+    }
+    return [cx / (3 * a2), cy / (3 * a2)];
   }
 
   function buildMesh(site, opt) {
@@ -363,14 +380,18 @@
     for (let row = 0; row < nRows; row++) {
       for (let col = 0; col < nCols; col++) {
         const x0 = minx + col * sx, y0 = miny + row * sy;
-        const rect = [[x0, y0], [x0 + sx, y0], [x0 + sx, y0 + sy], [x0, y0 + sy]];
-        const inside = clippedArea(rect, outline);
+        const box = [[x0, y0], [x0 + sx, y0], [x0 + sx, y0 + sy], [x0, y0 + sy]];
+        // 外郭線からはみ出した部分は落とす。建物は建てられる範囲に収まる。
+        const rect = clipToOutline(box, outline);
+        if (rect.length < 3) continue;
+        const inside = polygonArea(rect);
         if (inside < sx * sy * threshold) continue;
+        const bx = rect.map(p => p[0]), by = rect.map(p => p[1]);
         cells.push({
           index: cells.length, rect,
-          bounds: [x0, y0, x0 + sx, y0 + sy],
-          center: [x0 + sx / 2, y0 + sy / 2],
-          areaM2: sx * sy,
+          bounds: [Math.min(...bx), Math.min(...by), Math.max(...bx), Math.max(...by)],
+          center: centroidOf(rect),
+          areaM2: inside,
         });
       }
     }

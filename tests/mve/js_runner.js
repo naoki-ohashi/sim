@@ -49,6 +49,8 @@ if (input.want.includes('mesh')) {
     cellCount: area.cells.length,
     outlineArea: area.outlineArea,
     maxFloors: area.cells.map(c => c.maxFloors),
+    cellAreas: area.cells.map(c => c.areaM2),
+    cellCenters: area.cells.map(c => c.center),
   };
 }
 if (input.want.includes('optimize')) {

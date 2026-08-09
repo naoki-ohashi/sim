@@ -16,8 +16,13 @@
 4. **日影規制に合わせる**: 超過している測定点について、**その点を実際に
    日影にしているマスだけ**を特定して下げます。建物全体を一律に低くする
    ようなことはしません。
+5. **天空率に合わせる**（`use_sky_ratio` のときだけ）: 斜線制限を外した
+   代わりに Ps ≧ Pr を確認し、足りない測定点について**稜線を作っている
+   マスだけ**を下げます（`sky_index.py`）。
+6. **積み直す**: 4・5で削った結果あいた容積率の余地に、規制を満たす範囲で
+   積み直します。
 
-## 4がこの実装の要点
+## 4・5がこの実装の要点
 
 `shadow_index.py` が (測定点, 時刻, マス) ごとの「しきい値高さ」を持って
 いるので、超過した測定点に対して
@@ -44,6 +49,7 @@ from .mesh import BuildableArea, assign_height_limits, build_mesh
 from .regulations.shadow import ShadowLineResult, ShadowRegulationSpec, compute_shadow_hours
 from .shadow_index import ShadowIndex, build_shadow_index
 from .site import Site
+from .sky_index import SkyIndex, SkyRatioSummary, build_sky_index, summarize
 
 
 @dataclass
@@ -54,6 +60,9 @@ class OptimizeOptions:
     coverage_threshold: float = 0.5
     use_sky_ratio: bool = False
     max_iterations: int = 4000
+    #: 天空率の測定点の間隔(m)と方位の分割数（use_sky_ratio のときだけ使う）
+    sky_ratio_interval_m: float = 4.0
+    sky_ratio_n_azimuth: int = 72
 
 
 @dataclass
@@ -68,7 +77,10 @@ class OptimizeResult:
     coverage_limited: bool = False
     far_limited: bool = False
     shadow_limited: bool = False
+    sky_ratio_limited: bool = False
     volume_removed_by_shadow_m3: float = 0.0
+    volume_removed_by_sky_ratio_m3: float = 0.0
+    sky_ratio: SkyRatioSummary | None = None
     notes: list[str] = field(default_factory=list)
 
     # --- 集計 -------------------------------------------------------
@@ -102,6 +114,15 @@ class OptimizeResult:
     def shadow_ok(self) -> bool:
         return all(line.ok for line in self.shadow_lines) if self.shadow_lines else True
 
+    @property
+    def sky_ratio_ok(self) -> bool:
+        """天空率を使った場合に、すべての測定点で Ps ≧ Pr を満たしているか。
+
+        天空率を使っていない場合（斜線制限をそのまま守っている場合）は、
+        判定の必要がないので True を返します。
+        """
+        return self.sky_ratio.ok if self.sky_ratio is not None else True
+
     def summary_lines_ja(self) -> list[str]:
         site = self.site
         lines = [
@@ -129,14 +150,26 @@ class OptimizeResult:
             binding.append("容積率")
         if self.shadow_limited:
             binding.append("日影規制")
+        if self.sky_ratio_limited:
+            binding.append("天空率")
         lines.append("上限に達した規制: " + ("・".join(binding) if binding else "なし"))
         if self.shadow_limited:
             lines.append(f"　日影規制で削った体積: {self.volume_removed_by_shadow_m3:.1f} m3")
+        if self.sky_ratio_limited:
+            lines.append(f"　天空率で削った体積: {self.volume_removed_by_sky_ratio_m3:.1f} m3")
         for line in self.shadow_lines:
             label = "5m〜10m" if line.distance_m == 5.0 else "10m超"
             lines.append(
                 f"　{label}の測定線（{line.max_hours}時間以内）: "
                 f"{'適合' if line.ok else '不適合'} / 最大 {line.worst_hours:.2f}時間"
+            )
+        if self.sky_ratio is not None:
+            sky = self.sky_ratio
+            lines.append(
+                f"　天空率（法56条7項・{sky.n_points}点で判定）: "
+                f"{'適合' if sky.ok else '不適合'} / "
+                f"最小余裕 {sky.worst_margin:+.2f}%"
+                f"（Ps {sky.worst_ps:.2f}% ≧ Pr {sky.worst_pr:.2f}%）"
             )
         lines.extend(self.far.notes)
         lines.extend(self.notes)
@@ -263,6 +296,65 @@ def _resolve_shadow(
     return touched, removed_volume, notes
 
 
+def _resolve_sky_ratio(
+    area: BuildableArea, floors: np.ndarray, index: SkyIndex,
+    floor_height_m: float, max_iterations: int,
+) -> tuple[bool, float, list[str]]:
+    """Ps < Pr の測定点について、稜線を作っているマスだけを下げる。
+
+    日影の解消（`_resolve_shadow`）と同じ考え方です。ある測定点の天空率は
+    **各方位の稜線を作っているマス**だけで決まるので、そこに含まれないマスを
+    いくら下げても改善しません。候補の中から「天空率の改善 / 失う体積」が
+    最も大きいマスを1階ずつ下げます。
+
+    戻り値は (天空率が制約になったか, 削った体積, メモ)。
+    """
+    cell_areas = np.array([c.area_m2 for c in area.cells])
+    removed_volume = 0.0
+    touched = False
+    notes: list[str] = []
+
+    for _ in range(max_iterations):
+        heights = floors * floor_height_m
+        worst = index.worst(heights)
+        if worst is None:
+            break
+        touched = True
+        point_index, ps_now, _deficit = worst
+
+        candidates = [c for c in index.ridge_cells(point_index, heights) if floors[c] > 0]
+        best = None
+        for ci in candidates:
+            trial = heights.copy()
+            trial[ci] -= floor_height_m
+            gain = index.ps_at(point_index, trial) - ps_now
+            if gain <= 1e-12:
+                continue
+            cost = float(cell_areas[ci]) * floor_height_m
+            score = gain / cost if cost > 0 else 0.0
+            if best is None or score > best[0]:
+                best = (score, ci, cost)
+
+        if best is None:
+            notes.append(
+                "天空率を満たすためにマスを下げようとしましたが、"
+                "これ以上下げても改善しませんでした（壁面後退距離を増やすと"
+                "適合しやすくなります）。"
+            )
+            break
+
+        _score, ci, cost = best
+        floors[ci] -= 1
+        removed_volume += cost
+    else:
+        notes.append(
+            f"天空率の解消が{max_iterations}回の調整で収束しませんでした。"
+            "メッシュを粗くするか、条件を見直してください。"
+        )
+
+    return touched, removed_volume, notes
+
+
 def _floors_to_blocks(area: BuildableArea, floors: np.ndarray, floor_height_m: float) -> list[Block]:
     """階数配列を、階ごとにまとめたブロックへ変換する。
 
@@ -327,6 +419,9 @@ def optimize(
     floors = np.array([c.max_floors for c in area.cells], dtype=int)
     if not floors.any():
         notes.append("斜線制限により、1階分の高さも確保できませんでした。")
+    # 天空率で斜線制限を外すと上限が無限になり得るので、1本の柱だけで容積率を
+    # 使い切る階数で頭を抑える。以降の削り込みが現実的な回数で終わる。
+    _cap_by_far(area, floors, site.max_total_floor_area_m2())
 
     # 2. 建蔽率
     coverage_limited = _apply_coverage_cap(area, floors, site.max_building_area_m2())
@@ -335,40 +430,91 @@ def optimize(
     far_limited = _apply_far_cap(area, floors, site.max_total_floor_area_m2())
 
     # 4. 日影規制（原因となるマスだけを下げる）
+    shadow_index = None
     shadow_limited = False
     removed = 0.0
     if shadow_spec is not None and floors.any():
-        index = build_shadow_index(site, area, shadow_spec)
+        shadow_index = build_shadow_index(site, area, shadow_spec)
         shadow_limited, removed, shadow_notes = _resolve_shadow(
-            area, floors, index, floor_h, opt.max_iterations)
+            area, floors, shadow_index, floor_h, opt.max_iterations)
         notes.extend(shadow_notes)
-        # 日影で削った結果、容積率の余地が空くことがあるので積み直しを試みる
-        if shadow_limited:
-            _refill_after_shadow(area, floors, index, site, floor_h)
+
+    # 5. 天空率（斜線制限に代えて適合させる場合のみ）
+    #    下げる方向の操作なので、ここで日影が悪化することはない。
+    sky_index = None
+    sky_limited = False
+    removed_sky = 0.0
+    if opt.use_sky_ratio and floors.any():
+        sky_index = build_sky_index(
+            site, area,
+            interval_m=opt.sky_ratio_interval_m,
+            n_azimuth=opt.sky_ratio_n_azimuth,
+        )
+        sky_limited, removed_sky, sky_notes = _resolve_sky_ratio(
+            area, floors, sky_index, floor_h, opt.max_iterations)
+        notes.extend(sky_notes)
+
+    # 6. 削った結果あいた容積率の余地に積み直す（日影・天空率の両方を守る）
+    if shadow_limited or sky_limited:
+        _refill(area, floors, site, floor_h, shadow_index, sky_index)
 
     blocks = _floors_to_blocks(area, floors, floor_h)
     shadow_lines = (compute_shadow_hours(site, blocks, shadow_spec)
                     if shadow_spec is not None else [])
+    sky_summary = (summarize(sky_index, floors * floor_h)
+                   if sky_index is not None else None)
+    if sky_summary is not None and not sky_summary.ok:
+        notes.append(
+            f"天空率が不足したままです（最小余裕 {sky_summary.worst_margin:+.2f}%）。"
+            "壁面後退距離を増やすか、斜線制限のまま（use_sky_ratio: false）で"
+            "検討してください。"
+        )
 
     return OptimizeResult(
         site=site, area=area, floors=floors, blocks=blocks, far=far,
         shadow_spec=shadow_spec, shadow_lines=shadow_lines,
         coverage_limited=coverage_limited, far_limited=far_limited,
-        shadow_limited=shadow_limited, volume_removed_by_shadow_m3=removed,
-        notes=notes,
+        shadow_limited=shadow_limited, sky_ratio_limited=sky_limited,
+        volume_removed_by_shadow_m3=removed,
+        volume_removed_by_sky_ratio_m3=removed_sky,
+        sky_ratio=sky_summary, notes=notes,
     )
 
 
-def _refill_after_shadow(
-    area: BuildableArea, floors: np.ndarray, index: ShadowIndex,
-    site: Site, floor_height_m: float, max_passes: int = 200,
-) -> None:
-    """日影で削った後、まだ余裕のあるマスに積み直す。
+def _cap_by_far(area: BuildableArea, floors: np.ndarray, max_floor_area_m2: float) -> None:
+    """1本の柱だけで容積率を使い切る階数を上限にする。
 
-    日影に効いていないマス（南側など）は、削る必要がなかったのに容積率の
-    頭打ちで低く抑えられている場合があります。上限・建蔽率・容積率・日影の
-    すべてを満たす範囲で1階ずつ戻します。
+    `use_sky_ratio` で斜線制限を外すと高さ上限が無限になることがあり、
+    そのままでは削り込みの回数が現実的でなくなります。容積率を超える階数は
+    どのみち残らないので、先に頭を抑えます。
     """
+    for i, cell in enumerate(area.cells):
+        if cell.area_m2 <= 0:
+            floors[i] = 0
+            continue
+        ceiling = int(math.ceil(max_floor_area_m2 / cell.area_m2))
+        if floors[i] > ceiling:
+            floors[i] = ceiling
+
+
+def _refill(
+    area: BuildableArea, floors: np.ndarray, site: Site, floor_height_m: float,
+    shadow_index: ShadowIndex | None = None, sky_index: SkyIndex | None = None,
+    max_passes: int = 200,
+) -> None:
+    """日影・天空率で削った後、まだ余裕のあるマスに積み直す。
+
+    規制に効いていないマス（南側など）は、削る必要がなかったのに容積率の
+    頭打ちで低く抑えられている場合があります。上限・建蔽率・容積率に加えて
+    **日影と天空率の両方**を満たす範囲で1階ずつ戻します。
+    """
+    def feasible(heights: np.ndarray) -> bool:
+        if shadow_index is not None and not shadow_index.is_compliant(heights):
+            return False
+        if sky_index is not None and not sky_index.is_compliant(heights):
+            return False
+        return True
+
     cell_areas = np.array([c.area_m2 for c in area.cells])
     max_floors = np.array([c.max_floors for c in area.cells], dtype=int)
     far_cap = site.max_total_floor_area_m2()
@@ -393,7 +539,7 @@ def _refill_after_shadow(
 
         for i in candidates:
             floors[i] += 1
-            if index.is_compliant(floors * floor_height_m):
+            if feasible(floors * floor_height_m):
                 break  # 1階積めたので次のパスへ
             floors[i] -= 1
         else:

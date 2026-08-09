@@ -157,14 +157,17 @@ def test_voxel_beats_uniform_scaling_on_floor_area():
     spec = _spec()
     result = optimize(site, spec, OptimizeOptions(cell_size_x_m=3.0, cell_size_y_m=3.0))
 
-    # 一律縮小の再現: 全マスを同じ階数にして、適合する最大の階数を探す
+    # 一律縮小の再現: 全マスを同じ階数にして、適合する最大の階数を探す。
+    # 建蔽率は旧方式でも守る必要があるので、同じ条件を課してから比べる。
     from mve.mesh import build_mesh as _build
+    from mve.optimizer import _apply_coverage_cap
     from mve.shadow_index import build_shadow_index
     area = _build(site, cell_size_x_m=3.0, cell_size_y_m=3.0)
     assign_height_limits(area)
     index = build_shadow_index(site, area, spec)
     cell_areas = np.array([c.area_m2 for c in area.cells])
     caps = np.array([c.max_floors for c in area.cells])
+    _apply_coverage_cap(area, caps, site.max_building_area_m2())
 
     best_uniform = 0.0
     for level in range(1, int(caps.max()) + 1):

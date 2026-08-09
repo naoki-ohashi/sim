@@ -85,6 +85,19 @@ def building_outline(site: Site) -> Polygon | None:
     return poly if poly.is_valid and poly.area > 1e-9 else None
 
 
+def _largest_polygon(geom) -> Polygon | None:
+    """交差結果から多角形を1つ取り出す（複数に割れたら最大のもの）。"""
+    if geom.is_empty:
+        return None
+    if isinstance(geom, Polygon):
+        return geom if geom.area > 1e-12 else None
+    polygons = [g for g in getattr(geom, "geoms", []) if isinstance(g, Polygon)]
+    if not polygons:
+        return None
+    largest = max(polygons, key=lambda g: g.area)
+    return largest if largest.area > 1e-12 else None
+
+
 def build_mesh(
     site: Site,
     cell_size_x_m: float = 3.0,
@@ -120,10 +133,11 @@ def build_mesh(
             x0 = minx + col * cell_size_x_m
             y0 = miny + row * cell_size_y_m
             cell_box = box(x0, y0, x0 + cell_size_x_m, y0 + cell_size_y_m)
-            clipped = cell_box.intersection(work)
-            if clipped.is_empty or clipped.area < cell_box.area * coverage_threshold:
+            clipped = _largest_polygon(cell_box.intersection(work))
+            if clipped is None or clipped.area < cell_box.area * coverage_threshold:
                 continue
-            actual = rotate(cell_box, angle_deg, origin=pivot) if angle_deg else cell_box
+            # 外郭線からはみ出した部分は落とす。建物は建てられる範囲に収まる。
+            actual = rotate(clipped, angle_deg, origin=pivot) if angle_deg else clipped
             centroid = actual.centroid
             cells.append(MeshCell(
                 index=index, col=col, row=row, polygon=actual,

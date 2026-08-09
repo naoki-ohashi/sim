@@ -172,7 +172,13 @@
                shadowLimited: false, removedByShadow: 0 };
     }
 
-    E.assignHeightLimits(site, area, opt.useSkyRatio);
+    // 天空率（法56条7項）はブラウザ版では未実装。斜線制限を外すだけだと
+    // 適合を確認しないまま結果が出てしまうので、はっきり断る。
+    if (opt.useSkyRatio) {
+      throw new Error('天空率による検討はブラウザ版では未対応です。'
+                    + 'Python版（mve コマンド）を使ってください。');
+    }
+    E.assignHeightLimits(site, area, false);
     const fh = site.floorHeightM;
     const floors = area.cells.map(c => c.maxFloors);
     if (!floors.some(f => f > 0)) notes.push('斜線制限により、1階分の高さも確保できませんでした。');

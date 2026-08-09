@@ -90,13 +90,25 @@ def silhouette_elevation_rad(point3: tuple[float, float, float], azimuth_deg: fl
     return highest
 
 
+def azimuths_deg(n_azimuth: int, offset_ratio: float = 0.0) -> list[float]:
+    """サンプリングする方位の一覧。
+
+    `offset_ratio` は刻み幅に対するずらし量です。0.5 にすると、方位が
+    0/90/180/270度ちょうどにならないため、**軸に平行なメッシュの面に沿って
+    走る光線**という縮退がなくなります。この縮退があると、境界線上の測定点で
+    「面をかすめただけ」の光線が当たり判定になり、天空率が跳ねます。
+    """
+    step = 360.0 / n_azimuth
+    return [(i + offset_ratio) * step for i in range(n_azimuth)]
+
+
 def sky_ratio_percent(point3: tuple[float, float, float], blocks: list[Block],
-                      n_azimuth: int = 180) -> float:
+                      n_azimuth: int = 180, azimuth_offset_ratio: float = 0.0) -> float:
     """天空率(%)。正射影（ρ = cos仰角）でサンプリングする。"""
     dphi = 2 * math.pi / n_azimuth
     total = 0.0
-    for i in range(n_azimuth):
-        elevation = silhouette_elevation_rad(point3, i * 360.0 / n_azimuth, blocks)
+    for azimuth in azimuths_deg(n_azimuth, azimuth_offset_ratio):
+        elevation = silhouette_elevation_rad(point3, azimuth, blocks)
         rho = math.cos(elevation)
         total += 0.5 * rho * rho * dphi
     return total / math.pi * 100.0
@@ -158,8 +170,13 @@ def reference_building(site: Site, n_layers: int = 20) -> list[Block]:
 
 def check(site: Site, proposed: list[Block], reference: list[Block] | None = None,
           interval_m: float = 2.0, n_azimuth: int = 120,
-          measurement_height_m: float = 0.0) -> list[SkyRatioCheck]:
-    """すべての測定点で Ps ≧ Pr を確認する。"""
+          measurement_height_m: float = 0.0,
+          azimuth_offset_ratio: float = 0.0) -> list[SkyRatioCheck]:
+    """すべての測定点で Ps ≧ Pr を確認する。
+
+    Ps と Pr は**同じ方位**でサンプリングします。比較の一貫性が保たれれば
+    よいので、`azimuth_offset_ratio` はどちらにも同じ値が使われます。
+    """
     if reference is None:
         reference = reference_building(site)
     results = []
@@ -167,8 +184,8 @@ def check(site: Site, proposed: list[Block], reference: list[Block] | None = Non
         p3 = (point[0], point[1], measurement_height_m)
         results.append(SkyRatioCheck(
             point=point, kind=kind, edge_index=edge_index,
-            ps=sky_ratio_percent(p3, proposed, n_azimuth),
-            pr=sky_ratio_percent(p3, reference, n_azimuth),
+            ps=sky_ratio_percent(p3, proposed, n_azimuth, azimuth_offset_ratio),
+            pr=sky_ratio_percent(p3, reference, n_azimuth, azimuth_offset_ratio),
         ))
     return results
 

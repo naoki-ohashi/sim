@@ -198,6 +198,30 @@ def test_mesh_matches(cell, setback):
     assert js["cellCount"] == len(area.cells)
     assert js["outlineArea"] == pytest.approx(area.outline_area_m2, rel=1e-6)
     assert js["maxFloors"] == [c.max_floors for c in area.cells]
+    # 外郭線で切ったあとの面積・中心も一致すること（割り切れない幅で効く）
+    assert js["cellAreas"] == pytest.approx([c.area_m2 for c in area.cells], rel=1e-9)
+    flat_js = [v for c in js["cellCenters"] for v in c]
+    flat_py = [v for c in area.cells for v in c.center]
+    assert flat_js == pytest.approx(flat_py, rel=1e-9, abs=1e-9)
+
+
+def test_mesh_cells_stay_inside_the_outline():
+    """マスが建物外郭線をはみ出さないこと（Python版・JS版とも）。
+
+    はみ出していると、敷地の外に建物が建ち、建築面積も過大に出ます。
+    """
+    from shapely.ops import unary_union
+
+    cell = 4.0   # 30m / 4m は割り切れないので、端のマスが必ずはみ出す条件
+    site = _site()
+    area = build_mesh(site, cell_size_x_m=cell, cell_size_y_m=cell)
+    outside = unary_union([c.polygon for c in area.cells]).difference(area.outline)
+    assert outside.area == pytest.approx(0.0, abs=1e-9)
+    assert sum(c.area_m2 for c in area.cells) <= area.outline_area_m2 + 1e-9
+
+    options = {"cellSizeXM": cell, "cellSizeYM": cell, "coverageThreshold": 0.5}
+    js = _run_js({"want": ["mesh"], "site": _js_site(site), "meshOptions": options})["mesh"]
+    assert sum(js["cellAreas"]) == pytest.approx(sum(c.area_m2 for c in area.cells), rel=1e-9)
 
 
 # === 最適化（全体） ===================================================
@@ -226,6 +250,15 @@ def _optimize_parity(site, cell, shadow_spec):
 
 def test_optimize_matches_without_shadow():
     _optimize_parity(_site(), 5.0, None)
+
+
+def test_optimize_matches_when_cells_are_clipped():
+    """メッシュ幅が敷地寸法で割り切れない場合も一致すること。
+
+    端のマスが外郭線で切られるため、マスの面積と中心が両版で揃っている
+    必要があります。
+    """
+    _optimize_parity(_site(), 4.0, None)
 
 
 def test_optimize_matches_with_shadow():
