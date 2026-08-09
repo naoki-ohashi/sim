@@ -13,7 +13,7 @@ import sys
 from .config import load_project
 from .io.drawing import BACKENDS, write_dxf
 from .io.viewer3d import write_html
-from .optimizer import optimize
+from .optimizer import ENVELOPE_FAMILIES, optimize
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -34,6 +34,11 @@ def main(argv: list[str] | None = None) -> int:
         "--dxf-backend", choices=sorted(BACKENDS),
         help="DXFの書き出し方（既定r12＝JW-CAD向けの最小構成 / ezdxf＝他CAD互換重視）",
     )
+    parser.add_argument(
+        "--envelope", choices=ENVELOPE_FAMILIES, dest="envelope_family",
+        help="日影規制への対応方法（既定voxel＝自由形 / lean_to＝屋根越し / ridge＝棟状。"
+             "逆日影の建築的な量塊が欲しい場合は lean_to か ridge を指定）",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -45,6 +50,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.cell:
         project.options.cell_size_x_m = args.cell
         project.options.cell_size_y_m = args.cell
+    if args.envelope_family:
+        project.options.envelope_family = args.envelope_family
 
     for note in project.notes:
         print(f"[敷地] {note}")

@@ -136,6 +136,15 @@ def _build_options(data: dict | None) -> OptimizeOptions:
         max_iterations=data.get("max_iterations", 4000),
         sky_ratio_interval_m=data.get("sky_ratio_interval_m", 4.0),
         sky_ratio_n_azimuth=data.get("sky_ratio_n_azimuth", 72),
+        envelope_family=data.get("envelope_family", "voxel"),
+        roof_angle_span_deg=data.get("roof_angle_span_deg", 15.0),
+        roof_angle_step_deg=data.get("roof_angle_step_deg", 7.5),
+        roof_offset_steps=data.get("roof_offset_steps", 7),
+        roof_pitch_candidates_deg=tuple(
+            data.get("roof_pitch_candidates_deg", (20.0, 27.0, 35.0, 45.0))),
+        roof_far_pitch_candidates_deg=tuple(
+            data.get("roof_far_pitch_candidates_deg", (0.0, 20.0, 35.0))),
+        roof_fixed_low_azimuth_deg=data.get("roof_fixed_low_azimuth_deg"),
     )
 
 

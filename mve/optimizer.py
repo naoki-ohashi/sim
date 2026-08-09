@@ -13,9 +13,13 @@
    このとき「積める階数が多いマス」を優先して残すので、同じ建築面積でも
    容積を大きく取れます。
 3. **容積率で頭打ち**: 延床面積の上限を超えないよう、上の階から削ります。
-4. **日影規制に合わせる**: 超過している測定点について、**その点を実際に
-   日影にしているマスだけ**を特定して下げます。建物全体を一律に低くする
-   ようなことはしません。
+4. **日影規制に合わせる**: 既定（`envelope_family: "voxel"`）は、超過している
+   測定点について**その点を実際に日影にしているマスだけ**を特定して下げる
+   自由形です。建物全体を一律に低くするようなことはしません。
+   `envelope_family: "lean_to" | "ridge"` にすると、代わりに**逆日影**
+   （屋根越し・棟状パターン）で規則正しい1〜2枚の勾配面に沿って後退させます
+   （`roof_envelope.py`）。容積は自由形よりやや少なくなりますが、結果が
+   建築的に成立する量塊になります。
 5. **天空率に合わせる**（`use_sky_ratio` のときだけ）: 斜線制限を外した
    代わりに Ps ≧ Pr を確認し、足りない測定点について**稜線を作っている
    マスだけ**を下げます（`sky_index.py`）。
@@ -47,9 +51,16 @@ from .far import FarResult, compute_far
 from .massing import Block, footprint_area, max_height, total_floor_area, total_volume
 from .mesh import BuildableArea, assign_height_limits, build_mesh
 from .regulations.shadow import ShadowLineResult, ShadowRegulationSpec, compute_shadow_hours
+from .roof_envelope import RoofPlaneSpec, search_roof_envelope
 from .shadow_index import ShadowIndex, build_shadow_index
 from .site import Site
 from .sky_index import SkyIndex, SkyRatioSummary, build_sky_index, summarize
+
+#: 日影規制への対応方法。
+#:   voxel   … マスごとに独立に下げる自由形（既定・最も容積を稼げる）
+#:   lean_to … 屋根越しパターン（片流れ）。逆日影の建築的な量塊
+#:   ridge   … 棟状パターン（切妻）。lean_to を含む一般形
+ENVELOPE_FAMILIES = ("voxel", "lean_to", "ridge")
 
 
 @dataclass
@@ -63,6 +74,16 @@ class OptimizeOptions:
     #: 天空率の測定点の間隔(m)と方位の分割数（use_sky_ratio のときだけ使う）
     sky_ratio_interval_m: float = 4.0
     sky_ratio_n_azimuth: int = 72
+    #: 日影規制への対応方法。ENVELOPE_FAMILIES のいずれか。
+    envelope_family: str = "voxel"
+    #: 屋根形状（lean_to/ridge）を探索するときのパラメータ。既定は roof_envelope.py 参照。
+    roof_angle_span_deg: float = 15.0
+    roof_angle_step_deg: float = 7.5
+    roof_offset_steps: int = 7
+    roof_pitch_candidates_deg: tuple = (20.0, 27.0, 35.0, 45.0)
+    roof_far_pitch_candidates_deg: tuple = (0.0, 20.0, 35.0)
+    #: 棟の向きを固定したい場合（実務者が既に方向を決めている場合）に指定する
+    roof_fixed_low_azimuth_deg: float | None = None
 
 
 @dataclass
@@ -81,6 +102,8 @@ class OptimizeResult:
     volume_removed_by_shadow_m3: float = 0.0
     volume_removed_by_sky_ratio_m3: float = 0.0
     sky_ratio: SkyRatioSummary | None = None
+    #: lean_to/ridge を使ったときの屋根形状。voxel（既定）では None。
+    roof_spec: RoofPlaneSpec | None = None
     notes: list[str] = field(default_factory=list)
 
     # --- 集計 -------------------------------------------------------
@@ -153,6 +176,8 @@ class OptimizeResult:
         if self.sky_ratio_limited:
             binding.append("天空率")
         lines.append("上限に達した規制: " + ("・".join(binding) if binding else "なし"))
+        if self.roof_spec is not None:
+            lines.append(f"　逆日影: {self.roof_spec.describe_ja()}")
         if self.shadow_limited:
             lines.append(f"　日影規制で削った体積: {self.volume_removed_by_shadow_m3:.1f} m3")
         if self.sky_ratio_limited:
@@ -392,6 +417,8 @@ def optimize(
 ) -> OptimizeResult:
     """敷地に建てられる最大容積を求める。"""
     opt = options or OptimizeOptions()
+    if opt.envelope_family not in ENVELOPE_FAMILIES:
+        raise ValueError(f"envelope_family は {'/'.join(ENVELOPE_FAMILIES)} のいずれかにしてください")
     far = compute_far(site)
     notes: list[str] = []
 
@@ -429,15 +456,39 @@ def optimize(
     # 3. 容積率
     far_limited = _apply_far_cap(area, floors, site.max_total_floor_area_m2())
 
-    # 4. 日影規制（原因となるマスだけを下げる）
+    # 4. 日影規制
     shadow_index = None
     shadow_limited = False
     removed = 0.0
+    roof_spec: RoofPlaneSpec | None = None
+    use_roof_pattern = opt.envelope_family != "voxel"
+
     if shadow_spec is not None and floors.any():
-        shadow_index = build_shadow_index(site, area, shadow_spec)
-        shadow_limited, removed, shadow_notes = _resolve_shadow(
-            area, floors, shadow_index, floor_h, opt.max_iterations)
-        notes.extend(shadow_notes)
+        if use_roof_pattern:
+            # 屋根越し／棟状パターン：規則正しい1〜2枚の勾配面で後退させる
+            before = floors.copy()
+            roof_result = search_roof_envelope(
+                site, area, shadow_spec, floors, floor_h,
+                pattern=opt.envelope_family,
+                angle_span_deg=opt.roof_angle_span_deg,
+                angle_step_deg=opt.roof_angle_step_deg,
+                offset_steps=opt.roof_offset_steps,
+                pitch_candidates_deg=opt.roof_pitch_candidates_deg,
+                far_pitch_candidates_deg=opt.roof_far_pitch_candidates_deg,
+                fixed_low_azimuth_deg=opt.roof_fixed_low_azimuth_deg,
+            )
+            floors = roof_result.floors
+            roof_spec = roof_result.spec
+            shadow_limited = roof_spec is not None
+            cell_areas = np.array([c.area_m2 for c in area.cells])
+            removed = float(((before - floors) * cell_areas).sum()) * floor_h
+            notes.extend(roof_result.notes)
+        else:
+            # ボクセル自由形：超過している測定点ごとに、原因となるマスだけを下げる
+            shadow_index = build_shadow_index(site, area, shadow_spec)
+            shadow_limited, removed, shadow_notes = _resolve_shadow(
+                area, floors, shadow_index, floor_h, opt.max_iterations)
+            notes.extend(shadow_notes)
 
     # 5. 天空率（斜線制限に代えて適合させる場合のみ）
     #    下げる方向の操作なので、ここで日影が悪化することはない。
@@ -455,7 +506,10 @@ def optimize(
         notes.extend(sky_notes)
 
     # 6. 削った結果あいた容積率の余地に積み直す（日影・天空率の両方を守る）
-    if shadow_limited or sky_limited:
+    #    屋根形状パターンでは行わない。積み直すと規則正しい形が崩れるうえ、
+    #    このパスには日影のフリーフォーム版インデックス（shadow_index）が無く、
+    #    積み直しの適合チェックが日影を見落とす恐れがあるため。
+    if not use_roof_pattern and (shadow_limited or sky_limited):
         _refill(area, floors, site, floor_h, shadow_index, sky_index)
 
     blocks = _floors_to_blocks(area, floors, floor_h)
@@ -477,7 +531,7 @@ def optimize(
         shadow_limited=shadow_limited, sky_ratio_limited=sky_limited,
         volume_removed_by_shadow_m3=removed,
         volume_removed_by_sky_ratio_m3=removed_sky,
-        sky_ratio=sky_summary, notes=notes,
+        sky_ratio=sky_summary, roof_spec=roof_spec, notes=notes,
     )
 
 

@@ -28,7 +28,7 @@ C を通らない場合はしきい値を無限大（何m積んでも影を落�
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -53,6 +53,22 @@ class ShadowIndex:
     points: dict[float, list[Point]]              # 測定線距離 -> 測定点
     thresholds: dict[float, list[np.ndarray]]     # 測定線距離 -> 点ごとの (時刻, マス)
     n_cells: int
+    #: hours[i] における太陽方位角（真北基準・時計回り）。日の出前・日没後は None。
+    #: 逆日影（roof_envelope.py）が「最も厳しい方位」を特定するために使う。
+    sun_azimuths_deg: list[float | None] = field(default_factory=list)
+
+    def active_hours(self, distance_m: float, point_index: int,
+                      heights: np.ndarray) -> np.ndarray:
+        """現在の高さ配列で、その測定点を実際に日影にしている時刻のインデックス。"""
+        thresh = self.thresholds[distance_m][point_index]
+        shadowed = (heights[None, :] >= thresh).any(axis=1)
+        return np.where(shadowed)[0]
+
+    def offending_cells(self, distance_m: float, point_index: int, time_index: int,
+                        heights: np.ndarray) -> np.ndarray:
+        """ある時刻に、その測定点を日影にしているマス。"""
+        thresh = self.thresholds[distance_m][point_index][time_index]
+        return np.where(heights >= thresh)[0]
 
     def hours_at(self, distance_m: float, point_index: int, heights: np.ndarray) -> float:
         """現在の高さ配列における、その測定点の日影時間。"""
@@ -128,12 +144,15 @@ def build_shadow_index(
 
     # 時刻ごとの (太陽方向ベクトル, tanα) を先に用意する
     sun: list[tuple[tuple[float, float], float]] = []
+    sun_azimuths_deg: list[float | None] = []
     for hour in hours:
         altitude, azimuth = solar_position_deg(spec.latitude_deg, declination, hour)
         if altitude <= 0:
             sun.append((None, 0.0))
+            sun_azimuths_deg.append(None)
             continue
         sun.append((site.north.vector_for_azimuth(azimuth), math.tan(math.radians(altitude))))
+        sun_azimuths_deg.append(azimuth)
 
     for distance, pts in points.items():
         per_point = []
@@ -152,4 +171,5 @@ def build_shadow_index(
     return ShadowIndex(
         spec=spec, hours=hours, step_hours=step, points=points,
         thresholds=thresholds, n_cells=len(area.cells),
+        sun_azimuths_deg=sun_azimuths_deg,
     )

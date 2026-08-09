@@ -33,7 +33,7 @@ from .dxf_r12 import R12Drawing
 LAYERS = {
     "MVE-SITE": 7, "MVE-ROAD": 8, "MVE-SETBACK": 3, "MVE-OUTLINE": 5,
     "MVE-MESH": 254, "MVE-FLOORS": 2, "MVE-SHADOW-5M": 1, "MVE-SHADOW-10M": 30,
-    "MVE-NORTH": 1, "MVE-SUMMARY": 7,
+    "MVE-NORTH": 1, "MVE-SUMMARY": 7, "MVE-RIDGE": 6,
 }
 
 
@@ -61,6 +61,21 @@ def _add_north_symbol(pen: JwwDrawing, site: Site, origin: Point, size: float) -
                  "MVE-NORTH", 1)
     pen.text("N", (tip[0] + nx * size * 0.15, tip[1] + ny * size * 0.15),
              size * 0.2, "MVE-NORTH", 1)
+
+
+def _add_ridge_line(pen: JwwDrawing, site: Site, area, roof_spec, span: float) -> None:
+    """逆日影の屋根越し／棟状パターンの棟（稜線）を、外郭線を横切る線で描く。"""
+    low_normal = site.north.vector_for_azimuth(roof_spec.low_azimuth_deg)
+    ridge_dir = (low_normal[1], -low_normal[0])   # 低勾配側の90度：稜線の方向
+    cx, cy = area.outline.centroid.coords[0]
+    px = cx + roof_spec.ridge_offset_m * low_normal[0]
+    py = cy + roof_spec.ridge_offset_m * low_normal[1]
+    half = span
+    p1 = (px - ridge_dir[0] * half, py - ridge_dir[1] * half)
+    p2 = (px + ridge_dir[0] * half, py + ridge_dir[1] * half)
+    pen.line(p1, p2, "MVE-RIDGE", LAYERS["MVE-RIDGE"])
+    pen.text(f"棟 / {roof_spec.describe_ja()}", (px, py), span * 0.018,
+             "MVE-RIDGE", LAYERS["MVE-RIDGE"])
 
 
 #: 書き出しの実装。`r12` は外部ライブラリを使わない最小構成（JW-CAD向け）。
@@ -143,6 +158,10 @@ def write_dxf(result: OptimizeResult, path: str, draw_mesh: bool = True,
         pen.polyline(regulation_boundary(site, spec), "MVE-SITE", 253)
         for distance, layer in ((5.0, "MVE-SHADOW-5M"), (10.0, "MVE-SHADOW-10M")):
             pen.polyline(measurement_points(site, spec, distance), layer, LAYERS[layer])
+
+    # 逆日影：屋根越し／棟状パターンの棟（稜線）
+    if result.roof_spec is not None and result.area is not None:
+        _add_ridge_line(pen, site, result.area, result.roof_spec, span)
 
     _add_north_symbol(pen, site, (max(xs) + span * 0.15, max(ys)), span * 0.18)
 

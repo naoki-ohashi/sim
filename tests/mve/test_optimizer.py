@@ -201,3 +201,48 @@ def test_blocks_are_grouped_by_floor():
     for block in result.blocks:
         assert block.height == pytest.approx(floor_h)
         assert (block.z_bottom / floor_h) == pytest.approx(round(block.z_bottom / floor_h))
+
+
+# === 逆日影パターン（envelope_family）との接続 ============================
+
+def test_rejects_unknown_envelope_family():
+    with pytest.raises(ValueError):
+        optimize(_site(), _spec(), OptimizeOptions(envelope_family="hip"))
+
+
+def test_roof_pattern_result_is_independently_compliant():
+    from mve.regulations.shadow import compute_shadow_hours
+
+    site = _site(far=3.0, road_width=8.0)
+    spec = _spec(line_5m_max_hours=5.0, line_10m_max_hours=3.0)
+    result = optimize(site, spec, OptimizeOptions(
+        cell_size_x_m=3.0, cell_size_y_m=3.0, envelope_family="ridge"))
+
+    assert result.roof_spec is not None
+    lines = compute_shadow_hours(site, result.blocks, spec)
+    assert all(line.ok for line in lines)
+
+
+def test_roof_pattern_summary_names_the_shape():
+    site = _site(far=3.0, road_width=8.0)
+    spec = _spec()
+    result = optimize(site, spec, OptimizeOptions(
+        cell_size_x_m=3.0, cell_size_y_m=3.0, envelope_family="lean_to"))
+    summary = "\n".join(result.summary_lines_ja())
+    assert "逆日影" in summary
+    assert "屋根越し" in summary
+
+
+def test_voxel_family_never_sets_roof_spec():
+    result = optimize(_site(far=2.0), _spec(), OptimizeOptions(cell_size_x_m=4.0, cell_size_y_m=4.0))
+    assert result.roof_spec is None
+
+
+def test_roof_family_never_exceeds_voxel_floor_area():
+    """屋根形状（規則正しい後退）は、自由形（ボクセル）より容積が大きくなることはない。"""
+    site = _site(far=3.0, road_width=8.0)
+    spec = _spec()
+    voxel = optimize(site, spec, OptimizeOptions(cell_size_x_m=3.0, cell_size_y_m=3.0))
+    ridge = optimize(site, spec, OptimizeOptions(
+        cell_size_x_m=3.0, cell_size_y_m=3.0, envelope_family="ridge"))
+    assert ridge.total_floor_area_m2 <= voxel.total_floor_area_m2 + 1e-6

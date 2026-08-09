@@ -72,6 +72,20 @@ mesh:
   sky_ratio_interval_m: 4.0   # 測定点の間隔(m)。細かくすると厳しく・遅くなる
   sky_ratio_n_azimuth: 72     # 天空を何方位で刻むか
 
+  # 日影規制への対応方法。
+  #   voxel   … マスごとに独立に下げる自由形（既定・最も容積を稼げる）
+  #   lean_to … 逆日影・屋根越しパターン（片流れ）。規則正しい量塊になる
+  #   ridge   … 逆日影・棟状パターン（切妻）。lean_to を含む一般形
+  # 棟の向きは、日影規制を最も厳しくしている太陽方位に自動でアンカーして
+  # 探索します（roof_angle_span_deg の範囲）。
+  envelope_family: voxel
+  # roof_angle_span_deg: 15.0   # 棟の向きを探索する範囲（臨界方位を中心に±この角度）
+  # roof_angle_step_deg: 7.5
+  # roof_offset_steps: 7        # 棟位置の候補数（ridgeのみ）
+  # roof_pitch_candidates_deg: [20.0, 27.0, 35.0, 45.0]       # 日影の厳しい側の勾配候補
+  # roof_far_pitch_candidates_deg: [0.0, 20.0, 35.0]          # 反対側（0=制限なし）
+  # roof_fixed_low_azimuth_deg: null   # 棟の向きを固定したい場合に指定（探索を省略）
+
 # --- 日影規制 ----------------------------------------------------------
 # このセクションを消すと日影のチェックを省略します。
 # 測定面と規制時間は条例で決まります。必ず確認してください。

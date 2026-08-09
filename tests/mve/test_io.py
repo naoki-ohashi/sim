@@ -259,3 +259,90 @@ def test_cli_reports_bad_config(tmp_path, capsys):
     config.write_text("site: {}\n", encoding="utf-8")
     assert main([str(config)]) == 1
     assert "設定の読み込みに失敗" in capsys.readouterr().err
+
+
+# === 逆日影パターン（屋根越し／棟状）のDXF ================================
+
+def _result_with_roof(pattern="ridge", far=3.0, road=8.0):
+    zoning = ZoningParams("1res", far, 0.6)
+    site = Site.from_rings(
+        SQUARE,
+        [{"kind": "road", "road_width_m": road}, {"kind": "adjacent"},
+         {"kind": "adjacent"}, {"kind": "adjacent"}],
+        zoning,
+    )
+    spec = ShadowRegulationSpec(
+        measurement_height_m=4.0, line_5m_max_hours=5.0, line_10m_max_hours=3.0,
+        time_step_minutes=30.0, sample_interval_m=6.0)
+    return optimize(site, spec, OptimizeOptions(
+        cell_size_x_m=3.0, cell_size_y_m=3.0, envelope_family=pattern))
+
+
+def test_dxf_draws_the_ridge_line_when_roof_pattern_is_used(tmp_path):
+    result = _result_with_roof("ridge")
+    assert result.roof_spec is not None, "この条件では屋根形状が使われるはず"
+    path = tmp_path / "out.dxf"
+    write_dxf(result, str(path))
+
+    msp = ezdxf.readfile(str(path)).modelspace()
+    ridge_lines = [e for e in msp if e.dxftype() == "LINE" and e.dxf.layer == "MVE-RIDGE"]
+    ridge_texts = [e for e in msp if e.dxftype() == "TEXT" and e.dxf.layer == "MVE-RIDGE"]
+    assert ridge_lines and ridge_texts
+
+
+def test_dxf_has_no_ridge_line_for_voxel_family(tmp_path):
+    zoning = ZoningParams("1res", 3.0, 0.6)
+    site = Site.from_rings(
+        SQUARE, [{"kind": "road", "road_width_m": 8.0}, {"kind": "adjacent"},
+                {"kind": "adjacent"}, {"kind": "adjacent"}], zoning)
+    spec = ShadowRegulationSpec(
+        measurement_height_m=4.0, line_5m_max_hours=5.0, line_10m_max_hours=3.0,
+        time_step_minutes=30.0, sample_interval_m=6.0)
+    result = optimize(site, spec, OptimizeOptions(cell_size_x_m=3.0, cell_size_y_m=3.0))
+    assert result.roof_spec is None
+
+    path = tmp_path / "out.dxf"
+    write_dxf(result, str(path))
+    msp = ezdxf.readfile(str(path)).modelspace()
+    assert not [e for e in msp if e.dxf.layer == "MVE-RIDGE"]
+
+
+# === 逆日影パターン（envelope_family）の設定・CLI ==========================
+
+def test_load_project_reads_envelope_family(tmp_path):
+    config = tmp_path / "p.yaml"
+    text = SAMPLE_YAML.format(dxf=tmp_path / "o.dxf", html=tmp_path / "o.html")
+    text = text.replace("mesh: {cell_size_x_m: 5.0, cell_size_y_m: 5.0}",
+                        "mesh: {cell_size_x_m: 5.0, cell_size_y_m: 5.0, envelope_family: ridge}")
+    config.write_text(text, encoding="utf-8")
+    project = load_project(str(config))
+    assert project.options.envelope_family == "ridge"
+
+
+def test_envelope_family_defaults_to_voxel(tmp_path):
+    config = tmp_path / "p.yaml"
+    config.write_text(SAMPLE_YAML.format(dxf=tmp_path / "o.dxf", html=tmp_path / "o.html"),
+                      encoding="utf-8")
+    project = load_project(str(config))
+    assert project.options.envelope_family == "voxel"
+
+
+def test_cli_envelope_flag_selects_roof_pattern(tmp_path, capsys):
+    from mve.cli import main
+    dxf, html = tmp_path / "o.dxf", tmp_path / "o.html"
+    config = tmp_path / "p.yaml"
+    config.write_text(SAMPLE_YAML.format(dxf=dxf, html=html), encoding="utf-8")
+
+    assert main([str(config), "--envelope", "lean_to"]) == 0
+    assert "逆日影" in capsys.readouterr().out
+
+
+def test_cli_rejects_unknown_envelope(tmp_path, capsys):
+    """argparse の choices が弾く（0以外の終了コードで止まる）。"""
+    from mve.cli import main
+    config = tmp_path / "p.yaml"
+    config.write_text(SAMPLE_YAML.format(dxf=tmp_path / "o.dxf", html=tmp_path / "o.html"),
+                      encoding="utf-8")
+    with pytest.raises(SystemExit) as exc:
+        main([str(config), "--envelope", "hip"])
+    assert exc.value.code != 0
