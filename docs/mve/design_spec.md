@@ -866,6 +866,7 @@ Windowsでは `MVE実行.bat` のダブルクリックで、Python検出・依�
 | ファイル | 内容 |
 |---|---|
 | `README.md` | 使い方 |
+| `manual.md` | **取扱説明書**（操作手順・敷地データの作り方・結果の読み方） |
 | `web_ui.md` | ブラウザ版UIとPython版との一致検証 |
 | `legal_basis.md` | 条文と実装の対応、緩和対象の違い |
 | `methodology.md` | ボクセル最適化の考え方、旧方式との比較 |

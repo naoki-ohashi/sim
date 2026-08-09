@@ -7,7 +7,8 @@
 | **`mve/`** | 日影規制・斜線制限をふまえた最大容積の計算エンジン | **現行**。日影対応をボクセル法で作り直し、複数前面道路・各種緩和・真北・測定面選択に対応 |
 | `jwcad_volume/` | JW-CAD外部変形連携（JWC形式・バッチ・exe化） | 実績があるため維持。計算エンジンとしてはMVEが後継 |
 
-**MVEの使い方は [`docs/mve/README.md`](docs/mve/README.md)、設計の全体像は
+**MVEの操作手順は [`docs/mve/manual.md`](docs/mve/manual.md)（取扱説明書）、
+概要は [`docs/mve/README.md`](docs/mve/README.md)、設計の全体像は
 [`docs/mve/design_spec.md`](docs/mve/design_spec.md)（設計仕様書）を参照してください。**
 
 インストール不要のブラウザ版UIがあります（推奨）。
