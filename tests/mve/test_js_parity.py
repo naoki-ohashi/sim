@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from mve.far import compute_far
+from mve.isochrone import _default_grid_margin_m, site_isochrones
 from mve.mesh import assign_height_limits, build_mesh
 from mve.north import NorthReference
 from mve.optimizer import OptimizeOptions, optimize
@@ -24,6 +25,7 @@ from mve.regulations.sky_ratio import (
     reference_building,
     sky_ratio_percent,
 )
+from mve.shadow_index import grid_shadow_hours
 from mve.site import Site
 from mve.solar import day_of_year, solar_declination_deg, solar_position_deg
 from mve.zoning import ZoningParams
@@ -420,6 +422,81 @@ def test_optimize_matches_with_shadow_and_sky_ratio_jointly():
             sky_ratio_interval_m=3.0, sky_ratio_n_azimuth=48))
     assert py.shadow_limited and py.sky_ratio_limited, (
         "この条件では日影・天空率の両方が効くはず（テストの前提）")
+
+
+# === 等時間日影図 ======================================================
+
+def test_isochrone_grid_margin_matches():
+    spec = ShadowRegulationSpec(
+        measurement_height_m=4.0, line_5m_max_hours=5.0, line_10m_max_hours=3.0)
+    cases = [{"spec": _js_shadow(spec), "maxHeightM": h} for h in (0.0, 4.0, 9.0, 15.0)]
+    js = _run_js({"want": ["isochroneMargin"], "site": _js_site(_site()), "marginCases": cases})
+    for case, js_value in zip(cases, js["isochroneMargin"]):
+        py_value = _default_grid_margin_m(spec, case["maxHeightM"])
+        assert js_value == pytest.approx(py_value, rel=1e-9), case
+
+
+def test_isochrone_grid_shadow_hours_matches():
+    site = _site(far=4.0)
+    spec = ShadowRegulationSpec(
+        measurement_height_m=4.0, line_5m_max_hours=5.0, line_10m_max_hours=3.0,
+        time_step_minutes=30.0, sample_interval_m=6.0)
+    cell = 5.0
+    options = {"cellSizeXM": cell, "cellSizeYM": cell, "coverageThreshold": 0.5}
+    grid_points = [[x, y] for x in (-5.0, 5.0, 15.0, 25.0, 35.0) for y in (-5.0, 10.0, 25.0)]
+
+    js = _run_js({"want": ["gridShadowHours"], "site": _js_site(site), "meshOptions": options,
+                  "shadowSpec": _js_shadow(spec), "gridPoints": grid_points})["gridShadowHours"]
+
+    py_options = OptimizeOptions(cell_size_x_m=cell, cell_size_y_m=cell)
+    py = optimize(site, spec, py_options)
+    py_hours = grid_shadow_hours(
+        py.site, py.area, py.floors, spec, [tuple(p) for p in grid_points])
+    assert js == pytest.approx(list(py_hours), abs=1e-9)
+
+
+def test_isochrone_polylines_match():
+    """マーチングスクエア法で抽出した等高線の線分集合がPython/JSで一致すること。
+
+    ポリラインを繋ぐ順序はdict/Mapの反復順に依存しうるので、繋いだあとの
+    折れ線ではなく、繋ぐ前の線分（端点の組）の集合として比較する。
+    """
+    site = _site(far=4.0)
+    spec = ShadowRegulationSpec(
+        measurement_height_m=4.0, line_5m_max_hours=5.0, line_10m_max_hours=3.0,
+        time_step_minutes=30.0, sample_interval_m=6.0)
+    cell = 5.0
+    options = {"cellSizeXM": cell, "cellSizeYM": cell, "coverageThreshold": 0.5}
+    levels = [1.0, 2.0]
+    margin_m = 15.0
+    interval_m = 4.0
+
+    js = _run_js({"want": ["isochrone"], "site": _js_site(site), "meshOptions": options,
+                  "shadowSpec": _js_shadow(spec), "isochroneLevels": levels,
+                  "isochroneIntervalM": interval_m, "isochroneMarginM": margin_m})["isochrone"]
+
+    py_options = OptimizeOptions(cell_size_x_m=cell, cell_size_y_m=cell)
+    py = optimize(site, spec, py_options)
+    py_iso = site_isochrones(py.site, py.area, py.floors, spec, levels,
+                              interval_m=interval_m, margin_m=margin_m)
+
+    def segments(polylines):
+        segs = set()
+        for points, closed in polylines:
+            pts = [(round(p[0], 4), round(p[1], 4)) for p in points]
+            pairs = list(zip(pts, pts[1:]))
+            if closed and len(pts) > 1:
+                pairs.append((pts[-1], pts[0]))
+            for a, b in pairs:
+                segs.add(frozenset((a, b)))
+        return segs
+
+    for level in levels:
+        # JSのオブジェクトキーは数値を文字列化するので、整数値は "1.0" ではなく "1" になる
+        js_key = str(int(level)) if level == int(level) else str(level)
+        js_polylines = [(p["points"], p["closed"]) for p in js[js_key]]
+        py_polylines = py_iso[level]
+        assert segments(js_polylines) == segments(py_polylines), level
 
 
 def test_optimize_matches_with_sky_ratio_and_setback_relaxation():

@@ -8,12 +8,16 @@
 
   const E = window.MveEngine;
   const O = window.MveOptimizer;
+  const I = window.MveIsochrone;
   const $ = id => document.getElementById(id);
 
   const KIND_LABELS = { road: '道路境界線', adjacent: '隣地境界線', none: '規制の対象外' };
   const RELAX_LABELS = { none: 'なし', park: '公園・広場', water: '水面（河川等）', railway: '線路敷' };
 
   let lastResult = null;
+  let lastShadowSpec = null;
+  let lastIsochroneHours = [];
+  let lastIsochrones = null;
 
   // ===== 入力の読み取り ===============================================
   function sitePoints() {
@@ -148,6 +152,12 @@
     };
   }
 
+  // 等時間日影図の時間（カンマ区切り、空欄なら計算しない）
+  function isochroneHours() {
+    return $('iso-hours').value.split(',')
+      .map(s => parseFloat(s.trim())).filter(v => Number.isFinite(v) && v > 0);
+  }
+
   const meshOptions = () => ({
     cellSizeXM: +$('cell-x').value, cellSizeYM: +$('cell-y').value, coverageThreshold: 0.5,
     useSkyRatio: $('sky-on').checked,
@@ -273,7 +283,7 @@
   }
 
   // ===== 3D用データ ===================================================
-  function viewerData(result, shadowSpec) {
+  function viewerData(result, shadowSpec, isochroneResult) {
     const site = result.site;
     const xs = site.points.map(p => p[0]), ys = site.points.map(p => p[1]);
     const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
@@ -321,21 +331,37 @@
     const roads = site.edges
       .map((e, i) => (e.kind === 'road' ? { i, e } : null))
       .filter(Boolean)
-      .map(({ i, e }) => ({
-        widthM: e.roadWidthM,
-        opposite: E.oppositeBoundaryLine(site, i).map(p => T(p[0], p[1])),
-      }));
+      .map(({ i, e }) => {
+        const n = E.interiorNormal(e.p1, e.p2), w = e.roadWidthM;
+        const quad = [e.p1, e.p2,
+          [e.p2[0] - w * n[0], e.p2[1] - w * n[1]],
+          [e.p1[0] - w * n[0], e.p1[1] - w * n[1]]].map(p => T(p[0], p[1]));
+        return {
+          widthM: w, quad,
+          opposite: E.oppositeBoundaryLine(site, i).map(p => T(p[0], p[1])),
+        };
+      });
 
     const shadowLines = shadowSpec ? {
       m5: E.shadowMeasurementPoints(site, shadowSpec, 5.0).map(p => T(p[0], p[1])),
       m10: E.shadowMeasurementPoints(site, shadowSpec, 10.0).map(p => T(p[0], p[1])),
     } : null;
 
+    // 等時間日影図（ビューア座標系の { レベル: [{points, closed}, ...] } に変換する）
+    const isochrones = {};
+    if (isochroneResult) {
+      for (const [level, polylines] of Object.entries(isochroneResult)) {
+        isochrones[level] = polylines.map(([points, closed]) => ({
+          points: points.map(p => T(p[0], p[1])), closed,
+        }));
+      }
+    }
+
     const span = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys),
                           O.maxHeight(result), 10);
     return {
       site: site.points.map(p => T(p[0], p[1])),
-      final: faces, baseline: envelope, roads, shadowLines,
+      final: faces, baseline: envelope, roads, shadowLines, isochrones,
       summary: O.summaryLinesJa(result),
       radius: span * 0.75 || 1,
     };
@@ -350,8 +376,16 @@
         const site = buildSite();
         const shadowSpec = buildShadowSpec();
         lastResult = O.optimize(site, shadowSpec, meshOptions());
+        lastShadowSpec = shadowSpec;
         renderSummary(O.summaryLinesJa(lastResult));
-        window.JwcadVolumeViewer.setData(viewerData(lastResult, shadowSpec));
+
+        lastIsochroneHours = shadowSpec ? isochroneHours() : [];
+        lastIsochrones = (lastIsochroneHours.length && lastResult.area)
+          ? I.siteIsochrones(lastResult.site, lastResult.area, lastResult.floors, shadowSpec,
+                              lastIsochroneHours, +$('iso-interval').value || 2.0)
+          : null;
+
+        window.JwcadVolumeViewer.setData(viewerData(lastResult, shadowSpec, lastIsochrones));
         drawPlan();
         const fa = O.totalFloorArea(lastResult);
         $('status').textContent = fa > 0
@@ -429,6 +463,11 @@
         `  hokkaido: ${spec.hokkaido}`,
         `  time_step_minutes: ${spec.timeStepMinutes}`,
         `  sample_interval_m: ${spec.sampleIntervalM}`);
+      const hours = isochroneHours();
+      if (hours.length) {
+        out.push(`  isochrone_hours: [${hours.join(', ')}]`,
+          `  isochrone_grid_interval_m: ${+$('iso-interval').value || 2.0}`);
+      }
     }
     out.push('', 'output:', '  dxf_path: 結果.dxf', '  html_path: 結果_3d.html', '');
     return out.join('\n');
@@ -477,6 +516,10 @@
       const h10 = num(/line_10m_max_hours:\s*([\d.]+)/); if (h10 !== null) $('h10').value = h10;
       const lat = num(/latitude_deg:\s*([\d.]+)/); if (lat !== null) $('lat').value = lat;
       $('hokkaido').checked = /hokkaido:\s*true/.test(text);
+      const isoHours = text.match(/isochrone_hours:\s*\[([^\]]*)\]/);
+      $('iso-hours').value = isoHours ? isoHours[1].split(',').map(s => s.trim()).filter(Boolean).join(',') : '';
+      const isoInterval = num(/isochrone_grid_interval_m:\s*([\d.]+)/);
+      if (isoInterval !== null) $('iso-interval').value = isoInterval;
     }
     toggleShadow();
     rebuildEdgeInputs();
@@ -504,6 +547,41 @@
     });
     drawPlan();
     updateFarNote();
+  }
+
+  // ===== 敷地JSON/CSV読み込み ===========================================
+  // 解析ロジックはsite_import.js（DOM非依存・parity検証あり）。ここでは
+  // 解析結果を画面に反映するだけ。
+  const SI = window.MveSiteImport;
+
+  function applyImportedSite(imported) {
+    const { points, edges, notes } = imported;
+    if (points.length < 3) throw new Error('敷地の頂点が3つ以上必要です');
+    $('shape-mode').value = 'poly';
+    $('poly-points').value = points.map(p => `${p[0]},${p[1]}`).join('\n');
+    toggleShapeMode();
+    rebuildEdgeInputs();
+
+    if (edges) {
+      const divs = document.querySelectorAll('#edges .edge');
+      edges.forEach((e, i) => {
+        const div = divs[i];
+        if (!div) return;
+        const get = f => div.querySelector(`[data-f=${f}]`);
+        get('kind').value = e.kind;
+        if (e.kind === 'road' && e.roadWidthM != null) get('roadWidth').value = e.roadWidthM;
+        if (e.wallSetbackM != null) get('setback').value = e.wallSetbackM;
+        if (e.relaxation && e.relaxation.kind && e.relaxation.kind !== 'none') {
+          get('relaxKind').value = e.relaxation.kind;
+          if (e.relaxation.widthM != null) get('relaxWidth').value = e.relaxation.widthM;
+        }
+        if (e.groundLevelDiffM != null) get('levelDiff').value = e.groundLevelDiffM;
+        updateEdgeVisibility(div);
+      });
+    }
+    drawPlan();
+    updateFarNote();
+    $('status').textContent = notes.length ? notes.join(' ') : '設定を読み込みました';
   }
 
   function download(name, text, mime) {
@@ -556,13 +634,25 @@
   $('file-input').addEventListener('change', ev => {
     const file = ev.target.files[0];
     if (!file) return;
+    const ext = (file.name.match(/\.([^.]+)$/) || [, ''])[1].toLowerCase();
     const reader = new FileReader();
     reader.onload = () => {
-      try { fromYaml(reader.result); $('status').textContent = '設定を読み込みました'; }
-      catch (err) { alert('読み込みに失敗しました: ' + err.message); }
+      try {
+        if (ext === 'json') applyImportedSite(SI.parseSiteJson(reader.result));
+        else if (ext === 'csv') applyImportedSite(SI.parseSiteCsv(reader.result));
+        else { fromYaml(reader.result); $('status').textContent = '設定を読み込みました'; }
+      } catch (err) { alert('読み込みに失敗しました: ' + err.message); }
     };
     reader.readAsText(file);
     ev.target.value = '';
+  });
+  $('export-dxf').addEventListener('click', () => {
+    if (!lastResult || !lastResult.area) { alert('先に「計算する」を押してください'); return; }
+    try {
+      const text = window.MveDxf.buildSiteDxf(
+        lastResult, lastShadowSpec, lastIsochroneHours, lastIsochrones, window.MveDxf.JWW_UNITS_PER_METER);
+      window.MveDxf.saveDxf(text, '敷地.dxf');
+    } catch (err) { alert('DXFの書き出しに失敗しました: ' + err.message); }
   });
   window.addEventListener('resize', () => { drawPlan(); window.JwcadVolumeViewer.draw(); });
 

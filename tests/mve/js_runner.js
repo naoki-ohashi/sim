@@ -10,11 +10,12 @@ const webDir = path.join(__dirname, '..', '..', 'web', 'mve');
 const sandbox = { console, Math, JSON, Float64Array, Uint8Array, Infinity, NaN };
 sandbox.globalThis = sandbox;
 vm.createContext(sandbox);
-for (const file of ['engine.js', 'optimizer.js']) {
+for (const file of ['engine.js', 'optimizer.js', 'isochrone.js']) {
   vm.runInContext(fs.readFileSync(path.join(webDir, file), 'utf8'), sandbox, { filename: file });
 }
 const E = sandbox.MveEngine;
 const O = sandbox.MveOptimizer;
+const I = sandbox.MveIsochrone;
 
 const input = JSON.parse(fs.readFileSync(0, 'utf8'));
 const site = input.site;
@@ -89,6 +90,25 @@ if (input.want.includes('sky')) {
       return E.skyRatioPercent(c.point3, reference, nAzimuth, azimuthOffsetRatio);
     }),
   };
+}
+
+if (input.want.includes('isochroneMargin')) {
+  out.isochroneMargin = input.marginCases.map(c => I.defaultGridMarginM(c.spec, c.maxHeightM));
+}
+if (input.want.includes('gridShadowHours')) {
+  const r = O.optimize(site, input.shadowSpec, input.meshOptions);
+  out.gridShadowHours = Array.from(
+    I.gridShadowHours(site, r.area, r.floors, input.shadowSpec, input.gridPoints));
+}
+if (input.want.includes('isochrone')) {
+  const r = O.optimize(site, input.shadowSpec, input.meshOptions);
+  const iso = I.siteIsochrones(
+    site, r.area, r.floors, input.shadowSpec, input.isochroneLevels,
+    input.isochroneIntervalM, input.isochroneMarginM);
+  out.isochrone = {};
+  for (const level of input.isochroneLevels) {
+    out.isochrone[level] = (iso[level] || []).map(([points, closed]) => ({ points, closed }));
+  }
 }
 
 process.stdout.write(JSON.stringify(out));

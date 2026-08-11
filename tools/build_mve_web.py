@@ -20,9 +20,15 @@ MVE = WEB / "mve"
 OUT = ROOT / "dist" / "MVE敷地入力.html"
 
 # index.html の <script src=...> と同じ順番で結合する
-SCRIPTS = [MVE / "engine.js", MVE / "optimizer.js", WEB / "viewer.js", MVE / "app.js"]
+SCRIPTS = [MVE / "engine.js", MVE / "optimizer.js", MVE / "isochrone.js",
+           MVE / "site_import.js", MVE / "cp932_table.js", MVE / "dxf.js",
+           WEB / "viewer.js", MVE / "app.js"]
 SRC_TAGS = ['<script src="engine.js"></script>',
             '<script src="optimizer.js"></script>',
+            '<script src="isochrone.js"></script>',
+            '<script src="site_import.js"></script>',
+            '<script src="cp932_table.js"></script>',
+            '<script src="dxf.js"></script>',
             '<script src="../viewer.js"></script>',
             '<script src="app.js"></script>']
 

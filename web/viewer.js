@@ -135,6 +135,26 @@
     drawPolyline(proj, DATA.site, { stroke: '#7a8492', width: 2, dash: [7, 4], close: true });
   }
 
+  // 前面道路そのもの（幅員ぶんの帯）を、地面レベルの塗りつぶし面として描く。
+  // 上下どちらから見ても見えるよう、表裏両方の向きの面を用意する
+  // （裏面カリングで片方の視点から消えてしまわないようにするため）。
+  function roadFaces() {
+    const faces = [];
+    for (const road of DATA.roads || []) {
+      if (!road.quad) continue;
+      const ring = road.quad.map(p => [p[0], p[1], 0]);
+      faces.push({ k: 'top', v: ring });
+      faces.push({ k: 'top', v: ring.slice().reverse() });
+    }
+    return faces;
+  }
+
+  function drawRoadPlanes(proj) {
+    const faces = roadFaces();
+    if (!faces.length) return;
+    paint(collectFaces(faces, proj), { wall: [140, 148, 158], top: [140, 148, 158] }, 0.6, null);
+  }
+
   // 前面道路の「反対側」とみなす基準線（令130条の12・令134条を反映）。
   function drawRoads(proj) {
     for (const road of DATA.roads || []) {
@@ -185,6 +205,7 @@
     scale = (Math.min(cw, ch) * 0.36 / (DATA.radius || 1)) * view.zoom;
     cx = cw / 2; cy = ch / 2;
 
+    if (show.roads) drawRoadPlanes(proj);
     if (show.site) drawSite(proj);
     if (show.roads) drawRoads(proj);
     if (show.shadow) drawShadowLines(proj);

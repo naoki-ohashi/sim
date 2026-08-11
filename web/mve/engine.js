@@ -908,7 +908,7 @@
     buildingOutline, buildMesh, assignHeightLimits,
     dayOfYear, solarDeclinationDeg, solarPositionDeg,
     deemedBoundaryOffsets, regulationBoundary, shadowMeasurementPoints, trueSolarHours,
-    buildShadowIndex, hoursAt, worstViolation, isShadowCompliant, shadowSummary,
+    rayBoxEntry, buildShadowIndex, hoursAt, worstViolation, isShadowCompliant, shadowSummary,
     roadRequiredSetback, adjacentRequiredSetback, northRequiredSetback,
     requiredSetbackForHeight, buildableRingAtHeight, maxRelevantHeight, referenceBuilding,
     rayPolygonEntryDistance, silhouetteElevationRad, azimuthsDeg, skyRatioPercent,

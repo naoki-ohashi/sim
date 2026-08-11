@@ -210,6 +210,14 @@
           測定面と規制時間は条例で決まります。役所の都市計画課か自治体サイトの
           日影規制の表で必ず確認してください。既定値は説明用の一例です。
         </p>
+        <div class="row"><label>等時間日影図の時間<br><span class="hint">カンマ区切り。空欄なら計算しません</span></label>
+          <input type="text" id="iso-hours" placeholder="例: 2,3,4" style="width:112px"></div>
+        <div class="row"><label>等時間日影図のグリッド間隔</label>
+          <input type="number" id="iso-interval" value="2" min="0.5" step="0.5"><span class="unit">m</span></div>
+        <p class="hint">
+          等時間日影図は敷地の全面にグリッドを敷いて計算するため、5m/10m測定線より
+          時間がかかります。間隔を広げると速くなりますが線が粗くなります。
+        </p>
       </div>
     </fieldset>
 
@@ -246,12 +254,15 @@
       <legend>書き出し・読み込み</legend>
       <div class="btnrow">
         <button id="export-yaml">設定YAMLを保存</button>
-        <button id="import-yaml">設定YAMLを読み込み</button>
+        <button id="import-yaml">敷地を読み込み（YAML/JSON/CSV）</button>
+        <button id="export-dxf">DXF図面を保存</button>
       </div>
-      <input type="file" id="file-input" accept=".yaml,.yml" style="display:none">
+      <input type="file" id="file-input" accept=".yaml,.yml,.json,.csv" style="display:none">
       <p class="hint">
         保存したYAMLはPython版の <code>mve</code> にそのまま渡せます。
-        DXF図面の出力はPython版で行ってください。
+        JSON/CSVはHBU-ANALYZER等が出力する敷地の頂点データを想定しています
+        （列名や形式は<a href="../../docs/mve/web_ui.md" target="_blank" rel="noopener">操作マニュアル</a>を参照）。
+        DXFはJW-CADが読める形式（R12・mm・Shift_JIS）で書き出します。
       </p>
     </fieldset>
 
@@ -279,9 +290,11 @@
           <label><input type="checkbox" id="t-site" checked>
             <span class="swatch" style="background:#888"></span>敷地</label>
           <label><input type="checkbox" id="t-roads" checked>
-            <span class="swatch" style="background:#e0a23f"></span>道路の反対側境界線</label>
+            <span class="swatch" style="background:#8c949e"></span>前面道路（幅員・反対側境界線）</label>
           <label><input type="checkbox" id="t-shadow" checked>
             <span class="swatch" style="background:#3fa9f5"></span>日影5m/10m測定線</label>
+          <label><input type="checkbox" id="t-isochrones" checked>
+            <span class="swatch" style="background:#e05252"></span>等時間日影図</label>
           <div class="views3d">
             <button data-az="225" data-el="30">南西</button>
             <button data-az="135" data-el="30">南東</button>
@@ -304,6 +317,10 @@
 
 <script src="engine.js"></script>
 <script src="optimizer.js"></script>
+<script src="isochrone.js"></script>
+<script src="site_import.js"></script>
+<script src="cp932_table.js"></script>
+<script src="dxf.js"></script>
 <script src="../viewer.js"></script>
 <script src="app.js"></script>
 </body>
