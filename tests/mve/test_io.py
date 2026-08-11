@@ -170,6 +170,14 @@ def test_dxf_has_one_layer_per_floor(tmp_path):
 
 # === 3D出力 ===========================================================
 
+def _embedded_data(html: str) -> dict:
+    import json
+    marker = "JwcadVolumeViewer.init("
+    start = html.rindex(marker) + len(marker)  # viewer.jsのコメント中にも同じ文字列が出るため末尾から探す
+    end = html.index(");", start)
+    return json.loads(html[start:end])
+
+
 def test_html_is_self_contained(tmp_path):
     html = build_html(_result())
     assert "http://" not in html and "https://" not in html
@@ -183,6 +191,32 @@ def test_html_contains_japanese_summary(tmp_path):
     text = path.read_text(encoding="utf-8")
     assert "達成容積率" in text
     assert "敷地面積" in text
+
+
+def test_html_data_includes_opposite_road_boundary(tmp_path):
+    data = _embedded_data(build_html(_result()))
+    assert len(data["roads"]) == 1
+    assert data["roads"][0]["widthM"] == pytest.approx(6.0)
+    assert len(data["roads"][0]["opposite"]) == 2
+
+
+def test_html_data_has_empty_roads_when_no_road_edge(tmp_path):
+    specs = [{"kind": "adjacent"}, {"kind": "adjacent"},
+             {"kind": "adjacent"}, {"kind": "adjacent"}]
+    site = Site.from_rings(SQUARE, specs, ZoningParams("1res", 2.0, 0.6))
+    data = _embedded_data(build_html(_result(site=site)))
+    assert data["roads"] == []
+
+
+def test_html_data_includes_shadow_measurement_lines_when_configured(tmp_path):
+    data = _embedded_data(build_html(_result(shadow=True)))
+    assert len(data["shadowLines"]["m5"]) >= 3
+    assert len(data["shadowLines"]["m10"]) >= 3
+
+
+def test_html_data_omits_shadow_lines_without_shadow_spec(tmp_path):
+    data = _embedded_data(build_html(_result(shadow=False)))
+    assert data["shadowLines"] is None
 
 
 # === 設定ファイル =====================================================

@@ -83,6 +83,14 @@ class ShadowRegulationSpec:
     time_step_minutes: float = 10.0
     sample_interval_m: float = 2.0       # 測定線上の点の間隔
     apply_deemed_boundary: bool = True   # 令135条の12第3項の緩和を使うか
+    #: 等時間日影図（等時間日影線）を作る時間のリスト（例: [2.0, 3.0, 4.0, 5.0]）。
+    #: 空リスト（既定）なら作らない。`mve/isochrone.py` を参照。
+    isochrone_hours: list[float] = field(default_factory=list)
+    #: 等時間日影図のグリッド間隔(m)。細かくすると精度が上がるが計算時間も増える。
+    isochrone_grid_interval_m: float = 2.0
+    #: 等時間日影図のグリッドを敷地の外側にどれだけ広げるか(m)。
+    #: None なら建物高さと最低太陽高度から自動計算する。
+    isochrone_margin_m: float | None = None
 
     def __post_init__(self) -> None:
         if self.measurement_height_m not in (1.5, 4.0, 6.5):
@@ -96,6 +104,12 @@ class ShadowRegulationSpec:
                 "10m超の規制時間が5m〜10mの規制時間より長くなっています"
                 "（別表第四では外側ほど短くなります）"
             )
+        if any(h <= 0 for h in self.isochrone_hours):
+            raise ValueError("isochrone_hours は正の値で指定してください")
+        if self.isochrone_grid_interval_m <= 0:
+            raise ValueError("isochrone_grid_interval_m は正の値にしてください")
+        if self.isochrone_margin_m is not None and self.isochrone_margin_m <= 0:
+            raise ValueError("isochrone_margin_m は正の値にしてください")
 
     @property
     def hours_range(self) -> tuple[float, float]:

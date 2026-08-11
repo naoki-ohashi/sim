@@ -13,8 +13,11 @@ import json
 import sys
 from pathlib import Path
 
+from ..isochrone import site_isochrones
 from ..massing import Block
 from ..optimizer import OptimizeResult
+from ..regulations import road_slant
+from ..regulations.shadow import measurement_points
 from ..regulations.sky_ratio import reference_building
 from .dxf_pen import ensure_parent_dir
 
@@ -72,6 +75,12 @@ _TEMPLATE = """<!doctype html>
     <span class="swatch" style="background:#6ea8fe"></span>斜線制限エンベロープ</label>
   <label><input type="checkbox" id="t-site" checked>
     <span class="swatch" style="background:#888"></span>敷地</label>
+  <label><input type="checkbox" id="t-roads" checked>
+    <span class="swatch" style="background:#e0a23f"></span>道路の反対側境界線</label>
+  <label><input type="checkbox" id="t-shadow" checked>
+    <span class="swatch" style="background:#3fa9f5"></span>日影5m/10m測定線</label>
+  <label><input type="checkbox" id="t-isochrones" checked>
+    <span class="swatch" style="background:#e0c34a"></span>等時間日影図</label>
   <div class="views">
     <button data-az="225" data-el="30">南西</button>
     <button data-az="135" data-el="30">南東</button>
@@ -121,7 +130,32 @@ def _faces(blocks: list[Block], cx: float, cy: float, north_angle_deg: float) ->
     return faces
 
 
-def build_html(result: OptimizeResult, title: str = "MVE 最大ボリューム") -> str:
+def _isochrones_view(result: OptimizeResult, isochrones, to_view) -> dict:
+    """等時間日影図を、ビューア座標系の {レベル文字列: [{points, closed}, ...]} に変換する。"""
+    spec = result.shadow_spec
+    if spec is None or not spec.isochrone_hours or result.area is None:
+        return {}
+    data = isochrones if isochrones is not None else site_isochrones(
+        result.site, result.area, result.floors, spec, spec.isochrone_hours,
+        interval_m=spec.isochrone_grid_interval_m, margin_m=spec.isochrone_margin_m,
+    )
+    return {
+        f"{level:g}": [
+            {"points": [to_view(*p) for p in points], "closed": closed}
+            for points, closed in data.get(level, [])
+        ]
+        for level in spec.isochrone_hours
+    }
+
+
+def build_html(
+    result: OptimizeResult, title: str = "MVE 最大ボリューム",
+    isochrones: dict[float, list[tuple[list[tuple[float, float]], bool]]] | None = None,
+) -> str:
+    """`isochrones` は等時間日影図を計算済みなら渡す（`isochrone.site_isochrones`
+    の戻り値と同じ形）。省略すると必要な場合に内部で計算する。DXFと両方
+    書き出す場合は1回だけ計算して両方に渡すと計算時間を節約できる。
+    """
     site = result.site
     xs = [p[0] for p in site.points]
     ys = [p[1] for p in site.points]
@@ -140,12 +174,29 @@ def build_html(result: OptimizeResult, title: str = "MVE 最大ボリューム")
     top = max((b.z_top for b in envelope), default=10.0)
     span = max(max(xs) - min(xs), max(ys) - min(ys), top)
 
+    def to_view(x: float, y: float) -> list[float]:
+        dx, dy = x - cx, y - cy
+        return [round(dx * ca + dy * sa, 3), round(-dx * sa + dy * ca, 3)]
+
     data = {
         "site": site_view,
         "final": _faces(result.blocks, cx, cy, angle),
         "baseline": _faces(envelope, cx, cy, angle),
         "summary": result.summary_lines_ja(),
         "radius": round(span * 0.75, 3) or 1.0,
+        "roads": [
+            {"widthM": round(edge.road_width_m, 3),
+             "opposite": [to_view(*p) for p in road_slant.opposite_boundary_line(site, i)]}
+            for i, edge in enumerate(site.edges) if edge.is_road
+        ],
+        "shadowLines": (
+            {
+                "m5": [to_view(*p) for p in measurement_points(site, result.shadow_spec, 5.0)],
+                "m10": [to_view(*p) for p in measurement_points(site, result.shadow_spec, 10.0)],
+            }
+            if result.shadow_spec is not None else None
+        ),
+        "isochrones": _isochrones_view(result, isochrones, to_view),
     }
     try:
         viewer_js = _viewer_js_path().read_text(encoding="utf-8")
@@ -158,7 +209,10 @@ def build_html(result: OptimizeResult, title: str = "MVE 最大ボリューム")
             .replace("__DATA__", json.dumps(data, ensure_ascii=False, separators=(",", ":"))))
 
 
-def write_html(result: OptimizeResult, path: str, title: str = "MVE 最大ボリューム") -> None:
+def write_html(
+    result: OptimizeResult, path: str, title: str = "MVE 最大ボリューム",
+    isochrones: dict[float, list[tuple[list[tuple[float, float]], bool]]] | None = None,
+) -> None:
     ensure_parent_dir(path)
     with open(path, "w", encoding="utf-8") as f:
-        f.write(build_html(result, title))
+        f.write(build_html(result, title, isochrones=isochrones))

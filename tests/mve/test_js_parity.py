@@ -16,8 +16,14 @@ from mve.mesh import assign_height_limits, build_mesh
 from mve.north import NorthReference
 from mve.optimizer import OptimizeOptions, optimize
 from mve.regulations import road_slant
-from mve.regulations.height_field import height_limit_at
+from mve.regulations.height_field import height_limit_at, required_setback_for_height
 from mve.regulations.shadow import ShadowRegulationSpec, deemed_boundary_offsets
+from mve.regulations.sky_ratio import (
+    azimuths_deg,
+    measurement_points,
+    reference_building,
+    sky_ratio_percent,
+)
 from mve.site import Site
 from mve.solar import day_of_year, solar_declination_deg, solar_position_deg
 from mve.zoning import ZoningParams
@@ -291,3 +297,141 @@ def test_optimize_matches_with_two_roads():
 
 def test_optimize_matches_for_low_rise_zone():
     _optimize_parity(_site(zone="1low", far=0.8, coverage=0.5), 5.0, None)
+
+
+# === 天空率（法56条7項） ==============================================
+#
+# 左右対称な敷地・条件では、貪欲法のタイブレークが Python/JS で異なる場合
+# （どちらも同じ体積を削るが、削る場所の組み合わせが複数ある）があるため、
+# 天空率のテストは非対称な条件（後退距離・緩和のどちらかを辺ごとに変える）
+# を使う。
+
+_ASYMMETRIC_SPECS = [
+    {"kind": "road", "road_width_m": 6.0, "wall_setback_m": 1.5},
+    {"kind": "adjacent", "wall_setback_m": 1.0},
+    {"kind": "adjacent", "wall_setback_m": 1.0, "relaxation": {"kind": "water", "width_m": 4.0}},
+    {"kind": "adjacent", "wall_setback_m": 1.0},
+]
+
+# 後退距離は0のまま、緩和だけで左右対称を崩す（天空率が実際に効く条件を作りやすい）
+_SKY_ASYMMETRIC_SPECS = [
+    {"kind": "road", "road_width_m": 6.0},
+    {"kind": "adjacent"},
+    {"kind": "adjacent", "relaxation": {"kind": "water", "width_m": 4.0}},
+    {"kind": "adjacent"},
+]
+
+
+def test_azimuths_match():
+    js = _run_js({"want": ["sky"], "site": _js_site(_site()), "skyNAzimuth": 72,
+                  "skyAzimuthOffsetRatio": 0.5})["sky"]
+    assert js["azimuths"] == pytest.approx(azimuths_deg(72, 0.5))
+
+
+def test_sky_measurement_points_match():
+    site = _site(_ASYMMETRIC_SPECS, far=4.0)
+    js = _run_js({"want": ["sky"], "site": _js_site(site), "skyIntervalM": 3.0})["sky"]
+    py = measurement_points(site, 3.0)
+    assert len(js["measurementPoints"]) == len(py)
+    for jp, (p, kind, edge_index) in zip(js["measurementPoints"], py):
+        assert jp["point"] == pytest.approx(list(p), abs=1e-9)
+        assert jp["kind"] == kind
+        assert jp["edgeIndex"] == edge_index
+
+
+def test_reference_building_layer_count_matches():
+    site = _site(_ASYMMETRIC_SPECS, far=4.0)
+    js = _run_js({"want": ["sky"], "site": _js_site(site), "skyNLayers": 16})["sky"]
+    assert js["referenceLayerCount"] == len(reference_building(site, n_layers=16))
+
+
+def test_required_setback_for_height_matches():
+    site = _site(_ASYMMETRIC_SPECS, far=4.0)
+    cases = [{"edgeIndex": 0, "heightM": h} for h in (0.0, 5.0, 10.0, 20.0)]
+    cases += [{"edgeIndex": 1, "heightM": h} for h in (5.0, 15.0, 40.0)]
+    cases += [{"edgeIndex": 2, "heightM": h} for h in (5.0, 15.0, 40.0)]
+    js = _run_js({"want": ["sky"], "site": _js_site(site), "skySetbackCases": cases})["sky"]
+    for case, js_value in zip(cases, js["requiredSetbacks"]):
+        py_value = required_setback_for_height(site, case["edgeIndex"], case["heightM"])
+        assert js_value == pytest.approx(py_value, abs=1e-9), case
+
+
+def test_sky_ratio_percent_matches():
+    site = _site(_ASYMMETRIC_SPECS, far=4.0)
+    cases = [{"point3": [15, 0, 4]}, {"point3": [0, 10, 4]}, {"point3": [30, 10, 4]},
+             {"point3": [15, 20, 4]}]
+    js = _run_js({"want": ["sky"], "site": _js_site(site), "skyRatioCases": cases,
+                  "skyNLayers": 20})["sky"]
+    reference = reference_building(site, n_layers=20)
+    for case, js_value in zip(cases, js["skyRatios"]):
+        py_value = sky_ratio_percent(tuple(case["point3"]), reference, 72, 0.5)
+        assert js_value == pytest.approx(py_value, rel=1e-9), case
+
+
+def _sky_options(cell, extra=None):
+    options = {"cellSizeXM": cell, "cellSizeYM": cell, "coverageThreshold": 0.5,
+               "useSkyRatio": True, "skyRatioIntervalM": 3.0, "skyRatioNAzimuth": 48}
+    options.update(extra or {})
+    return options
+
+
+def _optimize_parity_with_options(site, shadow_spec, js_options, py_options):
+    payload = {"want": ["optimize"], "site": _js_site(site), "meshOptions": js_options}
+    if shadow_spec is not None:
+        payload["shadowSpec"] = _js_shadow(shadow_spec)
+    js = _run_js(payload)["optimize"]
+    py = optimize(site, shadow_spec, py_options)
+
+    assert js["floors"] == [int(f) for f in py.floors], "各マスの階数が一致していない"
+    assert js["volume"] == pytest.approx(py.volume_m3, rel=1e-6)
+    assert js["floorArea"] == pytest.approx(py.total_floor_area_m2, rel=1e-6)
+    assert js["buildingArea"] == pytest.approx(py.building_area_m2, rel=1e-6)
+    assert js["maxHeight"] == pytest.approx(py.max_height_m, rel=1e-6)
+    assert js["shadowLimited"] is py.shadow_limited
+    assert js["skyLimited"] is py.sky_ratio_limited
+    assert js["removedBySky"] == pytest.approx(py.volume_removed_by_sky_ratio_m3, rel=1e-6)
+    if py.sky_ratio is None:
+        assert js["skySummary"] is None
+    else:
+        assert js["skySummary"]["ok"] is py.sky_ratio.ok
+        assert js["skySummary"]["worstMargin"] == pytest.approx(py.sky_ratio.worst_margin, abs=1e-6)
+    assert js["summary"] == py.summary_lines_ja()
+    return js, py
+
+
+def test_optimize_matches_with_sky_ratio_only():
+    site = _site(_SKY_ASYMMETRIC_SPECS, far=2.0)
+    js, py = _optimize_parity_with_options(
+        site, None, _sky_options(4.0), OptimizeOptions(
+            cell_size_x_m=4.0, cell_size_y_m=4.0, use_sky_ratio=True,
+            sky_ratio_interval_m=3.0, sky_ratio_n_azimuth=48))
+    assert py.sky_ratio_limited, "この条件では天空率が効くはず（テストの前提）"
+
+
+def test_optimize_matches_with_shadow_and_sky_ratio_jointly():
+    """日影と天空率を同時に解消するケース（_resolve_shadow_and_sky_jointly の検証）。"""
+    site = _site(_SKY_ASYMMETRIC_SPECS, far=3.0)
+    spec = ShadowRegulationSpec(
+        measurement_height_m=4.0, line_5m_max_hours=5.0, line_10m_max_hours=3.0,
+        time_step_minutes=30.0, sample_interval_m=6.0)
+    js, py = _optimize_parity_with_options(
+        site, spec, _sky_options(4.0), OptimizeOptions(
+            cell_size_x_m=4.0, cell_size_y_m=4.0, use_sky_ratio=True,
+            sky_ratio_interval_m=3.0, sky_ratio_n_azimuth=48))
+    assert py.shadow_limited and py.sky_ratio_limited, (
+        "この条件では日影・天空率の両方が効くはず（テストの前提）")
+
+
+def test_optimize_matches_with_sky_ratio_and_setback_relaxation():
+    specs = [
+        {"kind": "road", "road_width_m": 5.0, "wall_setback_m": 0.5},
+        {"kind": "adjacent", "wall_setback_m": 0.5,
+         "relaxation": {"kind": "park", "width_m": 6.0}},
+        {"kind": "adjacent", "wall_setback_m": 1.5},
+        {"kind": "adjacent", "wall_setback_m": 0.5},
+    ]
+    site = _site(specs, far=3.0)
+    js, py = _optimize_parity_with_options(
+        site, None, _sky_options(5.0), OptimizeOptions(
+            cell_size_x_m=5.0, cell_size_y_m=5.0, use_sky_ratio=True,
+            sky_ratio_interval_m=3.0, sky_ratio_n_azimuth=48))

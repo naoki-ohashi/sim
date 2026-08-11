@@ -16,7 +16,7 @@
 (function (global) {
   'use strict';
 
-  let DATA = { site: [], final: [], baseline: [], summary: [], radius: 1 };
+  let DATA = { site: [], final: [], baseline: [], summary: [], radius: 1, roads: [], isochrones: {} };
 
 
   let canvas, ctx;
@@ -25,7 +25,8 @@
   const HOME = { az: 225, el: 30, zoom: 1, panX: 0, panY: 0 };
   let view = Object.assign({}, HOME);
 
-  const show = { final: true, base: true, site: true };
+  const show = { final: true, base: true, site: true, roads: true, shadow: true, isochrones: true };
+  const ISOCHRONE_COLORS = ['#e05252', '#e0c34a', '#4ac96e', '#4ac9c9', '#4a7ee0', '#c94ae0'];
 
   // --- 投影 -----------------------------------------------------------
   // Python側 mesh.Axonometric と同じ式。方位角は真北から時計回り。
@@ -113,20 +114,52 @@
     ctx.globalAlpha = 1;
   }
 
-  function drawSite(proj) {
-    const ring = DATA.site;
-    if (!ring.length) return;
+  // 汎用ポリライン描画（z=0平面）。道路の反対側境界線・日影測定線などで使う。
+  function drawPolyline(proj, points, style) {
+    if (!points || !points.length) return;
+    const opts = Object.assign({ stroke: '#7a8492', width: 2, dash: [], close: false }, style || {});
     ctx.beginPath();
-    ring.forEach((p, i) => {
+    points.forEach((p, i) => {
       const s = toScreen(proj.project([p[0], p[1], 0]));
       i ? ctx.lineTo(s[0], s[1]) : ctx.moveTo(s[0], s[1]);
     });
-    ctx.closePath();
-    ctx.strokeStyle = '#7a8492';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([7, 4]);
+    if (opts.close) ctx.closePath();
+    ctx.strokeStyle = opts.stroke;
+    ctx.lineWidth = opts.width;
+    ctx.setLineDash(opts.dash);
     ctx.stroke();
     ctx.setLineDash([]);
+  }
+
+  function drawSite(proj) {
+    drawPolyline(proj, DATA.site, { stroke: '#7a8492', width: 2, dash: [7, 4], close: true });
+  }
+
+  // 前面道路の「反対側」とみなす基準線（令130条の12・令134条を反映）。
+  function drawRoads(proj) {
+    for (const road of DATA.roads || []) {
+      drawPolyline(proj, road.opposite, { stroke: '#e0a23f', width: 1.5, dash: [3, 3] });
+    }
+  }
+
+  // 日影規制の5m/10m測定線。
+  function drawShadowLines(proj) {
+    const lines = DATA.shadowLines;
+    if (!lines) return;
+    drawPolyline(proj, lines.m5, { stroke: '#3fa9f5', width: 1.3, dash: [2, 3], close: true });
+    drawPolyline(proj, lines.m10, { stroke: '#f5734a', width: 1.3, dash: [2, 3], close: true });
+  }
+
+  // 等時間日影図（等時間日影線）。座標はPython側で計算済み（マーチングスクエア法はJS未実装）。
+  function drawIsochrones(proj) {
+    const iso = DATA.isochrones;
+    if (!iso) return;
+    Object.keys(iso).forEach((level, idx) => {
+      const color = ISOCHRONE_COLORS[idx % ISOCHRONE_COLORS.length];
+      for (const line of iso[level]) {
+        drawPolyline(proj, line.points, { stroke: color, width: 1.3, dash: [1, 2], close: line.closed });
+      }
+    });
   }
 
   function drawCompass(proj) {
@@ -153,6 +186,9 @@
     cx = cw / 2; cy = ch / 2;
 
     if (show.site) drawSite(proj);
+    if (show.roads) drawRoads(proj);
+    if (show.shadow) drawShadowLines(proj);
+    if (show.isochrones) drawIsochrones(proj);
     if (show.final) paint(collectFaces(DATA.final, proj), { wall: [201, 139, 75], top: [224, 170, 110] }, 1, 'rgba(0,0,0,.25)');
     // エンベロープは最後に半透明で重ね、ガラスケースのように見せる
     if (show.base) paint(collectFaces(DATA.baseline, proj), { wall: [110, 168, 254], top: [150, 195, 255] }, 0.22, 'rgba(110,168,254,.55)');
@@ -195,7 +231,9 @@
     });
     const reset = document.getElementById('reset');
     if (reset) reset.addEventListener('click', resetView);
-    for (const [id, key] of [['t-final', 'final'], ['t-base', 'base'], ['t-site', 'site']]) {
+    for (const [id, key] of [['t-final', 'final'], ['t-base', 'base'], ['t-site', 'site'],
+                              ['t-roads', 'roads'], ['t-shadow', 'shadow'],
+                              ['t-isochrones', 'isochrones']]) {
       const el = document.getElementById(id);
       if (el) el.addEventListener('change', e => { show[key] = e.target.checked; draw(); });
     }

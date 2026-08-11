@@ -68,7 +68,26 @@ if (input.want.includes('optimize')) {
     farLimited: r.farLimited,
     shadowLimited: r.shadowLimited,
     shadowLines: r.shadowLines,
+    skyLimited: r.skyLimited,
+    removedBySky: r.removedBySky,
+    skySummary: r.skySummary,
     summary: O.summaryLinesJa(r),
+  };
+}
+if (input.want.includes('sky')) {
+  const nAzimuth = input.skyNAzimuth || 72;
+  const azimuthOffsetRatio = input.skyAzimuthOffsetRatio != null ? input.skyAzimuthOffsetRatio : 0.5;
+  out.sky = {
+    azimuths: E.azimuthsDeg(nAzimuth, azimuthOffsetRatio),
+    measurementPoints: E.skyMeasurementPoints(site, input.skyIntervalM || 2.0)
+      .map(s => ({ point: s.point, kind: s.kind, edgeIndex: s.edgeIndex })),
+    referenceLayerCount: E.referenceBuilding(site, input.skyNLayers || 20).length,
+    requiredSetbacks: (input.skySetbackCases || []).map(c =>
+      E.requiredSetbackForHeight(site, c.edgeIndex, c.heightM)),
+    skyRatios: (input.skyRatioCases || []).map(c => {
+      const reference = E.referenceBuilding(site, input.skyNLayers || 20);
+      return E.skyRatioPercent(c.point3, reference, nAzimuth, azimuthOffsetRatio);
+    }),
   };
 }
 

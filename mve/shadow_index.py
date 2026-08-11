@@ -127,23 +127,17 @@ def _ray_entry_distances(origins: np.ndarray, direction: tuple[float, float],
     return np.where(hit, entry, np.inf)
 
 
-def build_shadow_index(
-    site: Site, area: BuildableArea, spec: ShadowRegulationSpec
-) -> ShadowIndex:
-    """しきい値高さのインデックスを作る。"""
-    boxes = np.array(
-        [list(cell.polygon.bounds) for cell in area.cells], dtype=float
-    ).reshape(-1, 4)
+def _sun_table(
+    site: Site, spec: ShadowRegulationSpec,
+) -> tuple[list[float], list[tuple[tuple[float, float] | None, float]], list[float | None]]:
+    """時刻ごとの太陽情報を先に計算する。
 
+    戻り値は (真太陽時のリスト, [(太陽方向ベクトル|None, tanα), ...], 太陽方位角のリスト)。
+    太陽が昇っていない時刻は方向ベクトルが None（tanαは0）。
+    """
     declination = solar_declination_deg(day_of_year(*WINTER_SOLSTICE))
     hours = spec.true_solar_hours()
-    step = spec.time_step_minutes / 60.0
-
-    points = {d: measurement_points(site, spec, d) for d in (5.0, 10.0)}
-    thresholds: dict[float, list[np.ndarray]] = {}
-
-    # 時刻ごとの (太陽方向ベクトル, tanα) を先に用意する
-    sun: list[tuple[tuple[float, float], float]] = []
+    sun: list[tuple[tuple[float, float] | None, float]] = []
     sun_azimuths_deg: list[float | None] = []
     for hour in hours:
         altitude, azimuth = solar_position_deg(spec.latitude_deg, declination, hour)
@@ -153,6 +147,90 @@ def build_shadow_index(
             continue
         sun.append((site.north.vector_for_azimuth(azimuth), math.tan(math.radians(altitude))))
         sun_azimuths_deg.append(azimuth)
+    return hours, sun, sun_azimuths_deg
+
+
+def _ray_entry_distances_batch(
+    origins: np.ndarray, direction: tuple[float, float], boxes: np.ndarray
+) -> np.ndarray:
+    """`_ray_entry_distances` の複数起点版（等時間日影図のグリッド計算専用）。
+
+    `origins` は (n, 2)。戻り値は (n, マス数) — 各起点から各マスまでの距離。
+    """
+    ox = origins[:, 0:1]
+    oy = origins[:, 1:2]
+    dx, dy = direction
+
+    def slab(o, d, lo, hi):
+        lo, hi = lo[None, :], hi[None, :]
+        if abs(d) < 1e-12:
+            inside = (lo <= o) & (o <= hi)
+            return (np.where(inside, -np.inf, np.inf),
+                    np.where(inside, np.inf, -np.inf))
+        t1 = (lo - o) / d
+        t2 = (hi - o) / d
+        return np.minimum(t1, t2), np.maximum(t1, t2)
+
+    tx_lo, tx_hi = slab(ox, dx, boxes[:, 0], boxes[:, 2])
+    ty_lo, ty_hi = slab(oy, dy, boxes[:, 1], boxes[:, 3])
+    t_enter = np.maximum(tx_lo, ty_lo)
+    t_exit = np.minimum(tx_hi, ty_hi)
+
+    hit = (t_enter <= t_exit) & (t_exit > 0)
+    entry = np.where(t_enter > 0, t_enter, 0.0)
+    return np.where(hit, entry, np.inf)
+
+
+def grid_shadow_hours(
+    site: Site, area: BuildableArea, floors: np.ndarray,
+    spec: ShadowRegulationSpec, grid_points: list[Point],
+) -> np.ndarray:
+    """各グリッド点の、冬至における実際の日影時間(h)（等時間日影図用）。
+
+    `build_shadow_index` は5m/10m測定線の点だけを対象にしていますが、
+    同じしきい値計算は任意の点集合に使い回せます。建物内部のグリッド点も
+    特別扱いしません — 自身の柱の高さが測定面を超えていれば、その柱への
+    距離 r がほぼ0でもしきい値高さの式が自然に成り立ち、常に「影の中」と
+    判定されます。人為的なマスク処理を入れるとかえって等高線が建物際で
+    不自然になるため、あえて何もしません。
+    """
+    boxes = np.array(
+        [list(cell.polygon.bounds) for cell in area.cells], dtype=float
+    ).reshape(-1, 4)
+    _hours, sun, _azimuths = _sun_table(site, spec)
+    step = spec.time_step_minutes / 60.0
+    heights = np.asarray(floors, dtype=float) * site.floor_height_m
+    origins = np.array(grid_points, dtype=float).reshape(-1, 2)
+    n_points = len(origins)
+
+    shadowed_hours = np.zeros(n_points)
+    if len(area.cells) == 0 or n_points == 0:
+        return shadowed_hours
+
+    for direction, tan_alt in sun:
+        if direction is None:
+            continue
+        r = _ray_entry_distances_batch(origins, direction, boxes)   # (n_points, n_cells)
+        thresh = spec.measurement_height_m + r * tan_alt
+        shadowed_now = np.any(heights[None, :] >= thresh, axis=1)   # (n_points,)
+        shadowed_hours += shadowed_now * step
+
+    return shadowed_hours
+
+
+def build_shadow_index(
+    site: Site, area: BuildableArea, spec: ShadowRegulationSpec
+) -> ShadowIndex:
+    """しきい値高さのインデックスを作る。"""
+    boxes = np.array(
+        [list(cell.polygon.bounds) for cell in area.cells], dtype=float
+    ).reshape(-1, 4)
+
+    hours, sun, sun_azimuths_deg = _sun_table(site, spec)
+    step = spec.time_step_minutes / 60.0
+
+    points = {d: measurement_points(site, spec, d) for d in (5.0, 10.0)}
+    thresholds: dict[float, list[np.ndarray]] = {}
 
     for distance, pts in points.items():
         per_point = []

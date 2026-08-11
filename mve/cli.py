@@ -13,6 +13,7 @@ import sys
 from .config import load_project
 from .io.drawing import BACKENDS, write_dxf
 from .io.viewer3d import write_html
+from .isochrone import site_isochrones
 from .optimizer import ENVELOPE_FAMILIES, optimize
 
 
@@ -64,6 +65,17 @@ def main(argv: list[str] | None = None) -> int:
     for line in result.summary_lines_ja():
         print(line)
 
+    # 等時間日影図は計算に時間がかかりうるため、DXFと3D両方に出す場合は
+    # ここで1回だけ計算して使い回す。
+    isochrones = None
+    if (result.shadow_spec is not None and result.shadow_spec.isochrone_hours
+            and result.area is not None):
+        spec = result.shadow_spec
+        isochrones = site_isochrones(
+            result.site, result.area, result.floors, spec, spec.isochrone_hours,
+            interval_m=spec.isochrone_grid_interval_m, margin_m=spec.isochrone_margin_m,
+        )
+
     dxf_path = args.dxf_out or project.output.dxf_path
     if dxf_path:
         units = args.dxf_units or project.output.dxf_units_per_meter
@@ -72,7 +84,7 @@ def main(argv: list[str] | None = None) -> int:
             write_dxf(result, dxf_path,
                       draw_mesh=project.output.draw_mesh,
                       draw_floor_labels=project.output.draw_floor_labels,
-                      units_per_meter=units, backend=backend)
+                      units_per_meter=units, backend=backend, isochrones=isochrones)
         except OSError as exc:
             return _write_failed("図面", dxf_path, exc)
         print(f"図面を書き出しました: {os.path.abspath(dxf_path)}"
@@ -81,7 +93,7 @@ def main(argv: list[str] | None = None) -> int:
     html_path = args.html_out or project.output.html_path
     if html_path:
         try:
-            write_html(result, html_path)
+            write_html(result, html_path, isochrones=isochrones)
         except OSError as exc:
             return _write_failed("3Dビューア", html_path, exc)
         print(f"3Dビューアを書き出しました: {os.path.abspath(html_path)}"

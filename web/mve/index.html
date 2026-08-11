@@ -214,7 +214,25 @@
     </fieldset>
 
     <fieldset>
-      <legend>6. メッシュ（計算の細かさ）</legend>
+      <legend>6. 天空率（法56条7項）</legend>
+      <div class="row"><label>斜線制限の代わりに天空率で検討する</label>
+        <input type="checkbox" id="sky-on"></div>
+      <div id="sky-inputs" style="display:none">
+        <div class="row"><label>測定点の間隔</label>
+          <input type="number" id="sky-interval" value="4" min="0.5" step="0.5"><span class="unit">m</span></div>
+        <div class="row"><label>方位の分割数</label>
+          <input type="number" id="sky-n-azimuth" value="72" min="8" step="4"></div>
+        <p class="hint warn">
+          天空率は絶対高さ制限だけを残して斜線制限を外し、代わりに全測定点で
+          Ps ≧ Pr を確認しながら検討します。測定点配置・投影方法は内部の
+          近似で、確認申請には使えません。屋根越し・棟状パターン（逆日影）は
+          天空率検討中は選べません（自由形のみ対応）。
+        </p>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>7. メッシュ（計算の細かさ）</legend>
       <div class="row"><label>X方向の幅</label>
         <input type="number" id="cell-x" value="3" min="0.5" step="0.5"><span class="unit">m</span></div>
       <div class="row"><label>Y方向の幅</label>
@@ -260,6 +278,10 @@
             <span class="swatch" style="background:#6ea8fe"></span>斜線制限エンベロープ</label>
           <label><input type="checkbox" id="t-site" checked>
             <span class="swatch" style="background:#888"></span>敷地</label>
+          <label><input type="checkbox" id="t-roads" checked>
+            <span class="swatch" style="background:#e0a23f"></span>道路の反対側境界線</label>
+          <label><input type="checkbox" id="t-shadow" checked>
+            <span class="swatch" style="background:#3fa9f5"></span>日影5m/10m測定線</label>
           <div class="views3d">
             <button data-az="225" data-el="30">南西</button>
             <button data-az="135" data-el="30">南東</button>

@@ -150,6 +150,9 @@
 
   const meshOptions = () => ({
     cellSizeXM: +$('cell-x').value, cellSizeYM: +$('cell-y').value, coverageThreshold: 0.5,
+    useSkyRatio: $('sky-on').checked,
+    skyRatioIntervalM: +$('sky-interval').value || 4.0,
+    skyRatioNAzimuth: +$('sky-n-azimuth').value || 72,
   });
 
   // ===== 平面図 =======================================================
@@ -270,7 +273,7 @@
   }
 
   // ===== 3D用データ ===================================================
-  function viewerData(result) {
+  function viewerData(result, shadowSpec) {
     const site = result.site;
     const xs = site.points.map(p => p[0]), ys = site.points.map(p => p[1]);
     const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
@@ -315,11 +318,24 @@
       }
     }
 
+    const roads = site.edges
+      .map((e, i) => (e.kind === 'road' ? { i, e } : null))
+      .filter(Boolean)
+      .map(({ i, e }) => ({
+        widthM: e.roadWidthM,
+        opposite: E.oppositeBoundaryLine(site, i).map(p => T(p[0], p[1])),
+      }));
+
+    const shadowLines = shadowSpec ? {
+      m5: E.shadowMeasurementPoints(site, shadowSpec, 5.0).map(p => T(p[0], p[1])),
+      m10: E.shadowMeasurementPoints(site, shadowSpec, 10.0).map(p => T(p[0], p[1])),
+    } : null;
+
     const span = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys),
                           O.maxHeight(result), 10);
     return {
       site: site.points.map(p => T(p[0], p[1])),
-      final: faces, baseline: envelope,
+      final: faces, baseline: envelope, roads, shadowLines,
       summary: O.summaryLinesJa(result),
       radius: span * 0.75 || 1,
     };
@@ -332,9 +348,10 @@
     setTimeout(() => {
       try {
         const site = buildSite();
-        lastResult = O.optimize(site, buildShadowSpec(), meshOptions());
+        const shadowSpec = buildShadowSpec();
+        lastResult = O.optimize(site, shadowSpec, meshOptions());
         renderSummary(O.summaryLinesJa(lastResult));
-        window.JwcadVolumeViewer.setData(viewerData(lastResult));
+        window.JwcadVolumeViewer.setData(viewerData(lastResult, shadowSpec));
         drawPlan();
         const fa = O.totalFloorArea(lastResult);
         $('status').textContent = fa > 0
@@ -397,6 +414,12 @@
       '', 'mesh:',
       `  cell_size_x_m: ${+$('cell-x').value}`,
       `  cell_size_y_m: ${+$('cell-y').value}`);
+    if ($('sky-on').checked) {
+      out.push(
+        '  use_sky_ratio: true',
+        `  sky_ratio_interval_m: ${+$('sky-interval').value || 4.0}`,
+        `  sky_ratio_n_azimuth: ${+$('sky-n-azimuth').value || 72}`);
+    }
     if (spec) {
       out.push('', 'shadow:',
         `  measurement_height_m: ${spec.measurementHeightM}`,
@@ -438,6 +461,13 @@
     $('abs-height').value = (abs && abs !== 'null') ? abs : '';
     const cx = num(/cell_size_x_m:\s*([\d.]+)/); if (cx !== null) $('cell-x').value = cx;
     const cy = num(/cell_size_y_m:\s*([\d.]+)/); if (cy !== null) $('cell-y').value = cy;
+
+    $('sky-on').checked = /use_sky_ratio:\s*true/.test(text);
+    if ($('sky-on').checked) {
+      const si = num(/sky_ratio_interval_m:\s*([\d.]+)/); if (si !== null) $('sky-interval').value = si;
+      const sn = num(/sky_ratio_n_azimuth:\s*([\d.]+)/); if (sn !== null) $('sky-n-azimuth').value = sn;
+    }
+    toggleSky();
 
     const hasShadow = /\nshadow:/.test(text);
     $('shadow-on').checked = hasShadow;
@@ -494,6 +524,9 @@
   const toggleShadow = () => {
     $('shadow-inputs').style.display = $('shadow-on').checked ? '' : 'none';
   };
+  const toggleSky = () => {
+    $('sky-inputs').style.display = $('sky-on').checked ? '' : 'none';
+  };
 
   function switchTab(view) {
     document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
@@ -507,6 +540,7 @@
   $('shape-mode').addEventListener('change', () => { toggleShapeMode(); rebuildEdgeInputs(); drawPlan(); });
   $('poly-points').addEventListener('change', () => { rebuildEdgeInputs(); drawPlan(); });
   $('shadow-on').addEventListener('change', toggleShadow);
+  $('sky-on').addEventListener('change', toggleSky);
   $('run').addEventListener('click', run);
   ['width', 'depth', 'north-angle', 'setback', 'cell-x', 'cell-y'].forEach(id =>
     $(id).addEventListener('input', drawPlan));
@@ -534,6 +568,7 @@
 
   toggleShapeMode();
   toggleShadow();
+  toggleSky();
   rebuildEdgeInputs();
   updateFarNote();
   // サマリーは書式付きで自前に描くので、ビューア側の描画は止める

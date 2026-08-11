@@ -276,6 +276,25 @@
     return limit;
   }
 
+  // 道路境界線の「反対側」とみなす基準線（3D表示用。Python版 road_slant.opposite_boundary_line 相当）。
+  // 令130条の12（後退緩和）・令134条（公園等緩和）を反映。令132条は点ごとに変わるため対象外。
+  function oppositeBoundaryLine(site, edgeIndex) {
+    const edge = site.edges[edgeIndex];
+    if (edge.kind !== 'road') throw new Error('道路境界線ではありません');
+    const offset = edge.roadWidthM + edge.wallSetbackM + relaxWidth(edge, ROAD_RELAX, false);
+    const [nx, ny] = outwardNormal(edge.p1, edge.p2);
+    return [
+      [edge.p1[0] + offset * nx, edge.p1[1] + offset * ny],
+      [edge.p2[0] + offset * nx, edge.p2[1] + offset * ny],
+    ];
+  }
+
+  function oppositeBoundaryLines(site) {
+    const out = [];
+    site.edges.forEach((e, i) => { if (e.kind === 'road') out.push([i, oppositeBoundaryLine(site, i)]); });
+    return out;
+  }
+
   function adjacentHeightLimit(site, point) {
     const params = adjacentSlantParams(site.zoning.zoneType);
     if (!params) return Infinity;
@@ -325,6 +344,322 @@
     if (useSkyRatio) return abs;
     return Math.min(roadHeightLimit(site, point), adjacentHeightLimit(site, point),
                     northHeightLimit(site, point), abs);
+  }
+
+  // ===== 高さ制限の逆関数（天空率の適合建築物用。Python版 height_field.py 相当） ==
+
+  // 道路斜線: 高さ height_m を確保するために必要な、道路境界線からの後退距離
+  function roadRequiredSetback(site, edgeIndex, heightM) {
+    const edge = site.edges[edgeIndex];
+    if (edge.kind !== 'road' || heightM <= 0) return 0;
+    const tier = roadSlantTier(site.zoning.zoneType, site.zoning.farRatio);
+    const base = edge.roadWidthM + edge.wallSetbackM + relaxWidth(edge, ROAD_RELAX, false);
+    const level = levelRelax(edge);
+    const h0 = tier.slope * base + level;
+    if (heightM <= h0) return 0;
+    const neededTotal = (heightM - level) / tier.slope;
+    const sNeeded = neededTotal - base;
+    const sMax = Math.max(0, tier.dist - base);
+    return Math.min(sNeeded, sMax);
+  }
+
+  // 隣地斜線: 高さ height_m を確保するために必要な、隣地境界線からの後退距離
+  function adjacentRequiredSetback(site, edgeIndex, heightM) {
+    const edge = site.edges[edgeIndex];
+    const params = adjacentSlantParams(site.zoning.zoneType);
+    if (!params || edge.kind !== 'adjacent' || heightM <= 0) return 0;
+    const [start, slope] = params;
+    const base = edge.wallSetbackM + relaxWidth(edge, ADJACENT_RELAX, true);
+    const level = levelRelax(edge);
+    const h0 = start + slope * base + level;
+    if (heightM <= h0) return 0;
+    return (heightM - level - start) / slope - base;
+  }
+
+  // 北側斜線: 高さ height_m を確保するために必要な、真北方向の距離（後退緩和は無い）
+  function northRequiredSetback(site, edgeIndex, heightM) {
+    const params = northSlantParams(site.zoning.zoneType);
+    if (!params || heightM <= 0) return 0;
+    const edge = site.edges[edgeIndex];
+    const [start, slope] = params;
+    const base = relaxWidth(edge, NORTH_RELAX, true) + (edge.kind === 'road' ? edge.roadWidthM : 0);
+    const level = levelRelax(edge);
+    const h0 = start + slope * base + level;
+    if (heightM <= h0) return 0;
+    return (heightM - level - start) / slope - base;
+  }
+
+  // 辺 edgeIndex について、高さ height_m に必要な後退距離（斜線種別を判定して振り分け）
+  function requiredSetbackForHeight(site, edgeIndex, heightM) {
+    const edge = site.edges[edgeIndex];
+    if (edge.kind === 'road') return roadRequiredSetback(site, edgeIndex, heightM);
+    if (edge.kind === 'adjacent') {
+      let needed = adjacentRequiredSetback(site, edgeIndex, heightM);
+      if (northEdgeIndices(site).includes(edgeIndex)) {
+        needed = Math.max(needed, northRequiredSetback(site, edgeIndex, heightM));
+      }
+      return needed;
+    }
+    return 0;
+  }
+
+  // 高さ height_m において斜線制限を満たす平面領域（各辺の必要後退距離の共通部分）
+  function buildableRingAtHeight(site, heightM) {
+    const distances = site.edges.map((_e, i) => requiredSetbackForHeight(site, i, heightM));
+    return offsetPolygonByEdgeDistances(site.points, distances);
+  }
+
+  // 検討する高さの上限。絶対高さ制限があればそれ、無ければ頂点・重心での
+  // 斜線制限の最大値に余裕を見た値（Python版 height_field.max_relevant_height 相当）
+  function maxRelevantHeight(site) {
+    if (site.zoning.absoluteHeightLimitM != null) return site.zoning.absoluteHeightLimitM;
+    const cx = site.points.reduce((s, p) => s + p[0], 0) / site.points.length;
+    const cy = site.points.reduce((s, p) => s + p[1], 0) / site.points.length;
+    const probes = site.points.concat([[cx, cy]]);
+    const values = probes.map(p => heightLimitAt(site, p, false)).filter(v => isFinite(v));
+    return values.length ? Math.max(...values) * 1.5 : 120.0;
+  }
+
+  // 適合建築物（斜線制限ぎりぎりの建物）を階段状に近似する
+  function referenceBuilding(site, nLayers) {
+    nLayers = nLayers || 20;
+    const top = maxRelevantHeight(site);
+    if (top <= 0) return [];
+    const blocks = [];
+    let previous = 0;
+    for (let k = 0; k < nLayers; k++) {
+      const zTop = (top * (k + 1)) / nLayers;
+      const ring = buildableRingAtHeight(site, previous);
+      if (ring && ring.length >= 3 && polygonArea(ring) > 1e-6) {
+        blocks.push({ ring, zBottom: previous, zTop });
+      }
+      previous = zTop;
+    }
+    return blocks;
+  }
+
+  // ===== 天空率（法56条7項、令135条の5〜11。Python版 sky_ratio.py 相当） =========
+  //
+  // 天空図の投影方法と測定点の配置は内部で一貫した近似（正射影・境界線上の
+  // 等間隔配置）です。告示が定める厳密な測定点設置規則には準拠していません。
+
+  const SKY_MEASUREMENT_EPSILON_M = 1.0e-3;
+
+  // 方位 azimuthDeg の半直線が凸多角形 ring（CCW）に入るまでの距離。
+  // 半平面（各辺の内側法線）の交差区間を求める、AABBスラブ法の多角形版。
+  function rayPolygonEntryDistance(origin, azimuthDeg, ring) {
+    const rad = (azimuthDeg * Math.PI) / 180;
+    const dx = Math.sin(rad), dy = Math.cos(rad);
+    let tEnter = -Infinity, tExit = Infinity;
+    const n = ring.length;
+    for (let i = 0; i < n; i++) {
+      const p1 = ring[i], p2 = ring[(i + 1) % n];
+      const nrm = interiorNormal(p1, p2);
+      const a = (origin[0] - p1[0]) * nrm[0] + (origin[1] - p1[1]) * nrm[1];
+      const b = dx * nrm[0] + dy * nrm[1];
+      if (Math.abs(b) < 1e-12) {
+        if (a < 0) return null;
+        continue;
+      }
+      const t = -a / b;
+      if (b > 0) { if (t > tEnter) tEnter = t; } else if (t < tExit) tExit = t;
+    }
+    if (tEnter > tExit) return null;
+    const entry = Math.max(tEnter, 0);
+    return entry > 1e-9 ? entry : null;
+  }
+
+  // 点 point3=[x,y,z0] から見た、方位 azimuthDeg・ブロック群 blocks（{ring,zBottom,zTop}）の仰角
+  function silhouetteElevationRad(point3, azimuthDeg, blocks) {
+    const [x, y, z0] = point3;
+    let highest = 0;
+    for (const block of blocks) {
+      if (block.zTop <= z0) continue;
+      const r = rayPolygonEntryDistance([x, y], azimuthDeg, block.ring);
+      if (r === null) continue;
+      const elevation = Math.atan2(block.zTop - z0, r);
+      if (elevation > highest) highest = elevation;
+    }
+    return highest;
+  }
+
+  // サンプリングする方位の一覧。offsetRatio=0.5 で軸に平行な光線の縮退を避ける
+  function azimuthsDeg(nAzimuth, offsetRatio) {
+    offsetRatio = offsetRatio || 0;
+    const step = 360 / nAzimuth;
+    const out = [];
+    for (let i = 0; i < nAzimuth; i++) out.push((i + offsetRatio) * step);
+    return out;
+  }
+
+  // 天空率(%)。正射影（ρ = cos仰角）でサンプリングする
+  function skyRatioPercent(point3, blocks, nAzimuth, azimuthOffsetRatio) {
+    nAzimuth = nAzimuth || 180;
+    azimuthOffsetRatio = azimuthOffsetRatio || 0;
+    const dphi = (2 * Math.PI) / nAzimuth;
+    let total = 0;
+    for (const az of azimuthsDeg(nAzimuth, azimuthOffsetRatio)) {
+      const elevation = silhouetteElevationRad(point3, az, blocks);
+      const rho = Math.cos(elevation);
+      total += 0.5 * rho * rho * dphi;
+    }
+    return (total / Math.PI) * 100;
+  }
+
+  // 各規制対象の境界線に沿った測定点（{point, kind, edgeIndex}）。
+  // 道路は「道路の反対側の境界線」上、隣地・北側は境界線上に置く。
+  function skyMeasurementPoints(site, intervalM) {
+    intervalM = intervalM || 2.0;
+    const result = [];
+    const northApplies = !!northSlantParams(site.zoning.zoneType);
+    const northSet = northApplies ? new Set(northEdgeIndices(site)) : new Set();
+
+    site.edges.forEach((edge, idx) => {
+      if (edge.kind === 'none') return;
+      let kind, shift;
+      if (edge.kind === 'road') { kind = 'road'; shift = edge.roadWidthM; }
+      else if (northSet.has(idx)) { kind = 'north'; shift = 0; }
+      else { kind = 'adjacent'; shift = 0; }
+
+      const [nx, ny] = interiorNormal(edge.p1, edge.p2);
+      const offset = shift + SKY_MEASUREMENT_EPSILON_M;
+      const p1 = [edge.p1[0] - offset * nx, edge.p1[1] - offset * ny];
+      const p2 = [edge.p2[0] - offset * nx, edge.p2[1] - offset * ny];
+      const [dx, dy] = edgeDirection(p1, p2);
+      const length = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
+      const count = Math.max(2, Math.ceil(length / intervalM) + 1);
+      for (let k = 0; k < count; k++) {
+        const t = (length * k) / (count - 1);
+        result.push({ point: [p1[0] + t * dx, p1[1] + t * dy], kind, edgeIndex: idx });
+      }
+    });
+    return result;
+  }
+
+  /* 天空率の「入射距離」インデックス（最適化用。Python版 sky_index.py 相当）
+   *
+   * (測定点, 方位, マス) ごとに、その方位の半直線がそのマスの外接矩形に
+   * 入るまでの距離を先に計算しておく。マスの高さと組み合わせれば仰角が
+   * 求まるので、以後は高さ配列との比較だけで天空率が求まる。
+   * 適合建築物（Pr）は形が変わらないので、実際の多角形で1回だけ計算する。
+   */
+  const DEFAULT_SKY_INTERVAL_M = 4.0;
+  const DEFAULT_SKY_N_AZIMUTH = 72;
+  const SKY_AZIMUTH_OFFSET_RATIO = 0.5;
+  const SKY_TOLERANCE_PERCENT = 1e-9;
+
+  function buildSkyIndex(site, area, intervalM, nAzimuth, measurementHeightM, reference, azimuthOffsetRatio) {
+    intervalM = intervalM || DEFAULT_SKY_INTERVAL_M;
+    nAzimuth = nAzimuth || DEFAULT_SKY_N_AZIMUTH;
+    measurementHeightM = measurementHeightM || 0;
+    azimuthOffsetRatio = azimuthOffsetRatio != null ? azimuthOffsetRatio : SKY_AZIMUTH_OFFSET_RATIO;
+    if (!reference) reference = referenceBuilding(site);
+
+    const nCells = area.cells.length;
+    const boxes = area.cells.map(c => c.bounds);
+    const samples = skyMeasurementPoints(site, intervalM);
+    const points = samples.map(s => s.point);
+    const kinds = samples.map(s => s.kind);
+    const edgeIndices = samples.map(s => s.edgeIndex);
+
+    const directions = azimuthsDeg(nAzimuth, azimuthOffsetRatio).map(a => {
+      const rad = (a * Math.PI) / 180;
+      return [Math.sin(rad), Math.cos(rad)];
+    });
+
+    const distances = [];
+    const pr = new Float64Array(points.length);
+    points.forEach((point, i) => {
+      const table = new Float64Array(nAzimuth * nCells).fill(Infinity);
+      if (nCells) {
+        directions.forEach((dir, ai) => {
+          const base = ai * nCells;
+          for (let ci = 0; ci < nCells; ci++) {
+            table[base + ci] = rayBoxEntry(point[0], point[1], dir[0], dir[1], boxes[ci]);
+          }
+        });
+      }
+      distances.push(table);
+      pr[i] = skyRatioPercent([point[0], point[1], measurementHeightM], reference, nAzimuth, azimuthOffsetRatio);
+    });
+
+    return {
+      points, kinds, edgeIndices, distances, pr,
+      measurementHeightM, nAzimuth, nCells, azimuthOffsetRatio,
+      dPhi: (2 * Math.PI) / nAzimuth,
+    };
+  }
+
+  // 現在の高さ配列における、その測定点の計画建築物の天空率(%)
+  function skyPsAt(index, pointIndex, heights) {
+    const table = index.distances[pointIndex];
+    const n = index.nCells;
+    if (n === 0) return 100.0;
+    let total = 0;
+    for (let ai = 0; ai < index.nAzimuth; ai++) {
+      const base = ai * n;
+      let maxElevation = 0;
+      for (let ci = 0; ci < n; ci++) {
+        const above = Math.max(heights[ci] - index.measurementHeightM, 0);
+        const elevation = Math.atan2(above, table[base + ci]);
+        if (elevation > maxElevation) maxElevation = elevation;
+      }
+      const rho = Math.cos(maxElevation);
+      total += 0.5 * rho * rho * index.dPhi;
+    }
+    return (total / Math.PI) * 100;
+  }
+
+  // 最も不足している測定点。戻り値は {pointIndex, ps, deficit} か null（すべて適合）
+  function skyWorst(index, heights) {
+    let worst = null;
+    for (let i = 0; i < index.points.length; i++) {
+      const ps = skyPsAt(index, i, heights);
+      const deficit = index.pr[i] - ps;
+      if (deficit > SKY_TOLERANCE_PERCENT && (!worst || deficit > worst.deficit)) {
+        worst = { pointIndex: i, ps, deficit };
+      }
+    }
+    return worst;
+  }
+
+  const skyIsCompliant = (index, heights) => skyWorst(index, heights) === null;
+
+  // その測定点で稜線（各方位の最大仰角）を作っているマス
+  function skyRidgeCells(index, pointIndex, heights) {
+    const table = index.distances[pointIndex];
+    const n = index.nCells;
+    if (n === 0) return [];
+    const cells = new Set();
+    for (let ai = 0; ai < index.nAzimuth; ai++) {
+      const base = ai * n;
+      let bestCell = -1, bestElevation = -Infinity;
+      for (let ci = 0; ci < n; ci++) {
+        const above = Math.max(heights[ci] - index.measurementHeightM, 0);
+        const elevation = Math.atan2(above, table[base + ci]);
+        if (elevation > bestElevation) { bestElevation = elevation; bestCell = ci; }
+      }
+      if (bestElevation > 1e-12) cells.add(bestCell);
+    }
+    return Array.from(cells).sort((a, b) => a - b);
+  }
+
+  // 最終形状の天空率の判定結果（サマリー・図面用）
+  function skySummary(index, heights) {
+    if (!index.points.length) {
+      return { nPoints: 0, worstMargin: 0, worstPoint: null, worstKind: '', worstPs: 0, worstPr: 0, ok: true };
+    }
+    let worst = null;
+    for (let i = 0; i < index.points.length; i++) {
+      const ps = skyPsAt(index, i, heights);
+      const margin = ps - index.pr[i];
+      if (!worst || margin < worst.margin) worst = { margin, i, ps, pr: index.pr[i] };
+    }
+    return {
+      nPoints: index.points.length, worstMargin: worst.margin, worstPoint: index.points[worst.i],
+      worstKind: index.kinds[worst.i], worstPs: worst.ps, worstPr: worst.pr,
+      ok: worst.margin >= -SKY_TOLERANCE_PERCENT,
+    };
   }
 
   // ===== 壁面後退線・建物外郭線・メッシュ =============================
@@ -567,11 +902,17 @@
     northVector, azimuthOfVector, vectorForAzimuth, facesNorth,
     zoneGroup, roadSlantTier, adjacentSlantParams, northSlantParams,
     computeFar, siteArea, maxBuildingArea, maxFloorArea, maxRoadWidth,
-    appliedRoadWidth, roadHeightLimit, adjacentHeightLimit, northHeightLimit,
+    appliedRoadWidth, roadHeightLimit, oppositeBoundaryLine, oppositeBoundaryLines,
+    adjacentHeightLimit, northHeightLimit,
     northEdgeIndices, heightLimitAt,
     buildingOutline, buildMesh, assignHeightLimits,
     dayOfYear, solarDeclinationDeg, solarPositionDeg,
     deemedBoundaryOffsets, regulationBoundary, shadowMeasurementPoints, trueSolarHours,
     buildShadowIndex, hoursAt, worstViolation, isShadowCompliant, shadowSummary,
+    roadRequiredSetback, adjacentRequiredSetback, northRequiredSetback,
+    requiredSetbackForHeight, buildableRingAtHeight, maxRelevantHeight, referenceBuilding,
+    rayPolygonEntryDistance, silhouetteElevationRad, azimuthsDeg, skyRatioPercent,
+    skyMeasurementPoints, buildSkyIndex, skyPsAt, skyWorst, skyIsCompliant, skyRidgeCells,
+    skySummary, DEFAULT_SKY_INTERVAL_M, DEFAULT_SKY_N_AZIMUTH, SKY_AZIMUTH_OFFSET_RATIO,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

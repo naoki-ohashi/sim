@@ -41,17 +41,47 @@ mve 敷地.yaml --dxf-out 図面.dxf --html-out 3d.html --cell 2.0
 
 ### 敷地の入力
 
-3通りの方法があります（`examples/mve_sample.yaml` 参照）。
+5通りの方法があります（`examples/mve_sample.yaml` 参照）。
 
 | 方法 | 書き方 |
 |---|---|
 | 座標を直接 | `site.points: [[0,0], [30,0], ...]` |
 | 長方形 | `site.rectangle: {width_m: 30, depth_m: 20}` |
 | DXFの敷地図 | `site.dxf: {path: 敷地図.dxf}` |
+| JSONの敷地図 | `site.json: {path: 敷地図.json}` |
+| CSVの敷地図 | `site.csv: {path: 敷地図.csv}` |
 
 DXFは閉じたポリラインか、つながった線分から読み取ります。線分で描いた
 場合は**レイヤ名**から境界線の種別を推測します（「道路」「隣地」を含む
 レイヤ名）。mmで作図した図面は `units_per_meter: 1000` を指定してください。
+
+JSON・CSVは外部ツール（測量ソフト等）が出力したポリゴンデータをそのまま
+取り込むための形式です。
+
+```json
+{
+  "points": [[0, 0], [30, 0], [30, 20], [0, 20]],
+  "edges": [
+    {"kind": "road", "road_width_m": 6.0, "wall_setback_m": 1.5},
+    {"kind": "adjacent"},
+    {"kind": "adjacent", "relaxation": {"kind": "water", "width_m": 4.0}},
+    {"kind": "adjacent"}
+  ]
+}
+```
+
+```csv
+x,y,kind,road_width_m,wall_setback_m,relaxation_kind,relaxation_width_m,ground_level_diff_m,label
+0,0,road,6.0,1.5,,,,南側道路
+30,0,adjacent,,,,,,
+30,20,adjacent,,,water,4.0,,水路に接する
+0,20,adjacent,,,,,,
+```
+
+どちらも `edges`（CSVは`kind`列）を省略すると全辺が「対象外」になり、
+YAML側の `site.edges` で辺の種別を後から指定できます（DXFのレイヤ名推測が
+無い場合と同じ扱い）。CSVはExcelで保存したShift-JISファイルにも対応
+（`site.csv: {path: ..., encoding: shift_jis}`）。
 
 ### 真北
 
@@ -158,7 +188,7 @@ mesh:
 
 > 天空図の投影方法と測定点の配置は内部で一貫した近似で、告示が定める厳密な
 > 測定点設置規則には準拠していません。**確認申請には使えません**
-> （`disclaimer.md`）。ブラウザ版は天空率に未対応です。
+> （`disclaimer.md`）。ブラウザ版でも同じロジックで検討できます。
 
 ## 出力
 

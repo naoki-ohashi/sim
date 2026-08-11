@@ -36,7 +36,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from ..geometry import Point, point_line_distance
+from ..geometry import Point, outward_normal, point_line_distance
 from ..site import Boundary, RelaxationKind, Site
 from ..zoning import road_slant_tier
 
@@ -155,6 +155,36 @@ def height_limit_at(site: Site, point: Point) -> float:
 
 def details_at(site: Site, point: Point) -> list[RoadSlantDetail]:
     return [detail_at(site, point, i) for i, e in enumerate(site.edges) if e.is_road]
+
+
+def opposite_boundary_line(site: Site, edge_index: int) -> tuple[Point, Point]:
+    """道路境界線の「反対側」とみなす基準線（3D表示・図面確認用）。
+
+    令130条の12（後退緩和）・令134条（公園等緩和）を反映した、実際に
+    道路斜線の高さ制限で使われている基準線です。令132条（2以上の前面
+    道路の幅員読み替え）は敷地内の点ごとに結果が変わるため、静的な1本の
+    線としては表現していません（`applied_width_at` を参照）。
+
+    後退・緩和が無ければ、道路の反対側境界線（`_road_polygon` が描く
+    帯の遠い辺）と一致します。
+    """
+    edge = site.edges[edge_index]
+    if not edge.is_road:
+        raise ValueError("道路境界線ではありません")
+
+    offset = edge.road_width_m + edge.wall_setback_m + _relaxation_extra(edge)
+    nx, ny = outward_normal(edge.p1, edge.p2)
+    p1 = (edge.p1[0] + offset * nx, edge.p1[1] + offset * ny)
+    p2 = (edge.p2[0] + offset * nx, edge.p2[1] + offset * ny)
+    return p1, p2
+
+
+def opposite_boundary_lines(site: Site) -> list[tuple[int, tuple[Point, Point]]]:
+    """前面道路すべてについて (辺インデックス, 反対側基準線) の一覧。"""
+    return [
+        (i, opposite_boundary_line(site, i))
+        for i, edge in enumerate(site.edges) if edge.is_road
+    ]
 
 
 def required_setback_for_height(site: Site, edge_index: int, height_m: float) -> float:

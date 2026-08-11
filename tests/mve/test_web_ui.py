@@ -146,3 +146,35 @@ def test_export_yaml_is_loadable_by_python(page, tmp_path):
     assert project.site.area_m2 > 0
     assert project.shadow is not None
     assert project.site.edges[0].kind.value == "road"
+
+
+def test_sky_ratio_can_be_enabled(page):
+    """天空率チェックボックスON状態で3Dタブに切り替えてもJSエラーが出ないこと。"""
+    page.check("#sky-on")
+    page.click("#run"); _wait(page)
+    assert not page.errors, page.errors
+    text = page.inner_text("#summary-body")
+    assert "天空率" in text
+
+    page.click(".tab[data-view=v3d]")
+    page.wait_for_timeout(400)
+    assert _pixels(page, "c3d") > 1000
+    assert not page.errors, page.errors
+    page.click(".tab[data-view=plan]")
+
+    with page.expect_download() as dl:
+        page.click("#export-yaml")
+    path = None
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        path = f"{tmp}/site_sky.yaml"
+        dl.value.save_as(path)
+
+        sys.path.insert(0, str(ROOT))
+        from mve.config import load_project
+
+        project = load_project(path)
+        assert project.options.use_sky_ratio is True
+
+    page.uncheck("#sky-on")
+    page.click("#run"); _wait(page)

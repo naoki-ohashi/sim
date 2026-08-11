@@ -39,13 +39,23 @@ class ImportedEdge:
     p2: Point
     layer: str = ""
     color: int = 0
+    #: JSON/CSVなど、種別・属性がデータそのものに明示されている場合はここに入れる。
+    #: 指定があれば `guess_kind()`/`edge_specs()` はレイヤ名推測より必ずこちらを優先する。
+    kind_hint: str | None = None
+    road_width_m: float | None = None
+    wall_setback_m: float | None = None
+    relaxation: dict | None = None
+    ground_level_diff_m: float | None = None
+    label: str = ""
 
     @property
     def length(self) -> float:
         return math.hypot(self.p2[0] - self.p1[0], self.p2[1] - self.p1[1])
 
     def guess_kind(self) -> str:
-        """レイヤ名から境界線の種別を推測する。"""
+        """境界線の種別を求める。`kind_hint` があればそれを、無ければレイヤ名から推測する。"""
+        if self.kind_hint is not None:
+            return self.kind_hint
         name = self.layer or ""
         if any(k in name for k in ROAD_KEYWORDS):
             return "road"
@@ -56,7 +66,7 @@ class ImportedEdge:
 
 @dataclass
 class ImportedSitePlan:
-    """DXFから読み取った敷地の外形。"""
+    """DXF/JSON/CSVから読み取った敷地の外形。"""
 
     points: list[Point]
     edges: list[ImportedEdge]
@@ -65,13 +75,32 @@ class ImportedSitePlan:
 
     def edge_specs(self, default_road_width_m: float = 6.0,
                    wall_setback_m: float = 0.0) -> list[dict]:
-        """`Site.from_rings` に渡せる辺の設定に変換する。"""
+        """`Site.from_rings` に渡せる辺の設定に変換する。
+
+        辺ごとに `road_width_m`/`wall_setback_m` 等が明示されていれば
+        それを使い、無ければ引数の既定値にフォールバックする
+        （DXFはレイヤ名推測のみなので常にフォールバック側、JSON/CSVは
+        辺ごとの値があればそちらを優先）。
+        """
         specs = []
         for edge in self.edges:
             kind = edge.guess_kind()
-            spec: dict = {"kind": kind, "wall_setback_m": wall_setback_m}
+            spec: dict = {
+                "kind": kind,
+                "wall_setback_m": edge.wall_setback_m if edge.wall_setback_m is not None
+                else wall_setback_m,
+            }
             if kind == "road":
-                spec["road_width_m"] = default_road_width_m
+                spec["road_width_m"] = (
+                    edge.road_width_m if edge.road_width_m is not None
+                    else default_road_width_m
+                )
+            if edge.relaxation is not None:
+                spec["relaxation"] = edge.relaxation
+            if edge.ground_level_diff_m is not None:
+                spec["ground_level_diff_m"] = edge.ground_level_diff_m
+            if edge.label:
+                spec["label"] = edge.label
             specs.append(spec)
         return specs
 

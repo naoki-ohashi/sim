@@ -148,6 +148,56 @@ def test_single_road_is_never_widened():
     assert not widened
 
 
+# === 反対側境界線（3D表示・図面確認用） ================================
+
+def test_opposite_boundary_line_uses_road_width_only():
+    site = _site()  # road_width_m=6.0、後退・緩和なし
+    p1, p2 = road_slant.opposite_boundary_line(site, 0)
+    assert p1 == pytest.approx((0.0, -6.0))
+    assert p2 == pytest.approx((30.0, -6.0))
+
+
+def test_opposite_boundary_line_reflects_setback():
+    """令130条の12: 後退距離ぶんさらに外側になる。"""
+    specs = [
+        {"kind": "road", "road_width_m": 6.0, "wall_setback_m": 4.0},
+        {"kind": "adjacent"}, {"kind": "adjacent"}, {"kind": "adjacent"},
+    ]
+    site = _site(specs=specs)
+    p1, _ = road_slant.opposite_boundary_line(site, 0)
+    assert p1 == pytest.approx((0.0, -10.0))  # 6 + 4
+
+
+def test_opposite_boundary_line_reflects_park_relaxation():
+    """令134条: 公園等の幅ぶんさらに外側になる。"""
+    specs = [
+        {"kind": "road", "road_width_m": 6.0,
+         "relaxation": {"kind": "park", "width_m": 10.0}},
+        {"kind": "adjacent"}, {"kind": "adjacent"}, {"kind": "adjacent"},
+    ]
+    site = _site(specs=specs)
+    p1, _ = road_slant.opposite_boundary_line(site, 0)
+    assert p1 == pytest.approx((0.0, -16.0))  # 6 + 10
+
+
+def test_opposite_boundary_line_rejects_non_road_edge():
+    site = _site()
+    with pytest.raises(ValueError, match="道路境界線ではありません"):
+        road_slant.opposite_boundary_line(site, 1)
+
+
+def test_opposite_boundary_lines_lists_all_road_edges():
+    specs = [
+        {"kind": "road", "road_width_m": 6.0},
+        {"kind": "adjacent"},
+        {"kind": "road", "road_width_m": 4.0},
+        {"kind": "adjacent"},
+    ]
+    site = _site(specs=specs)
+    result = road_slant.opposite_boundary_lines(site)
+    assert [i for i, _ in result] == [0, 2]
+
+
 # === 隣地斜線 =========================================================
 
 def test_adjacent_slant_residential_starts_at_20m():

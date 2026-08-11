@@ -13,6 +13,7 @@
 | `MVE-FLOORS` | 各マスの階数（文字） |
 | `MVE-PLAN-n` | 各階の平面輪郭 |
 | `MVE-SHADOW-5M` / `MVE-SHADOW-10M` | 日影の測定線 |
+| `MVE-ISOCHRONE-{時間}H` | 等時間日影線（`shadow.isochrone_hours` を指定したときのみ） |
 | `MVE-NORTH` | 真北記号 |
 | `MVE-SUMMARY` | 計算結果の要約（文字） |
 
@@ -24,6 +25,7 @@ from __future__ import annotations
 import math
 
 from ..geometry import Point, interior_normal, polygon_to_ring
+from ..isochrone import site_isochrones
 from ..optimizer import OptimizeResult
 from ..regulations.shadow import measurement_points, regulation_boundary
 from ..site import Site
@@ -85,7 +87,8 @@ BACKENDS = {"ezdxf": JwwDrawing, "r12": R12Drawing}
 def write_dxf(result: OptimizeResult, path: str, draw_mesh: bool = True,
               draw_floor_labels: bool = True,
               units_per_meter: float = JWW_UNITS_PER_METER,
-              backend: str = "r12") -> None:
+              backend: str = "r12",
+              isochrones: dict[float, list[tuple[list[Point], bool]]] | None = None) -> None:
     """計算結果をDXFに書き出す。
 
     `units_per_meter` は図面1単位が何mにあたるかの逆数です。既定の1000は
@@ -96,6 +99,11 @@ def write_dxf(result: OptimizeResult, path: str, draw_mesh: bool = True,
     JW-CADが解釈できる範囲だけを組み立てます（`dxf_r12.py`）。`ezdxf` は
     ezdxf が書くR12で、他のCADとの互換性は高いぶんJW-CADには読みにくい
     要素（大文字でないテーブル名・ハンドル・余分なテーブル）が入ります。
+
+    `isochrones` は等時間日影図を計算済みなら渡します（`isochrone.site_isochrones`
+    の戻り値と同じ形）。省略すると必要な場合に内部で計算します。DXFと3D
+    HTMLを両方書き出す場合、呼び出し側で1回だけ計算して両方に渡すと、
+    計算時間の大きい等時間日影図の再計算を避けられます。
     """
     if backend not in BACKENDS:
         raise ValueError(f"backend は {'/'.join(BACKENDS)} のいずれかにしてください")
@@ -158,6 +166,22 @@ def write_dxf(result: OptimizeResult, path: str, draw_mesh: bool = True,
         pen.polyline(regulation_boundary(site, spec), "MVE-SITE", 253)
         for distance, layer in ((5.0, "MVE-SHADOW-5M"), (10.0, "MVE-SHADOW-10M")):
             pen.polyline(measurement_points(site, spec, distance), layer, LAYERS[layer])
+
+        # 等時間日影図（等時間日影線）。isochrone_hours が空なら何もしない。
+        if spec.isochrone_hours and result.area is not None:
+            iso = isochrones if isochrones is not None else site_isochrones(
+                site, result.area, result.floors, spec, spec.isochrone_hours,
+                interval_m=spec.isochrone_grid_interval_m, margin_m=spec.isochrone_margin_m,
+            )
+            iso_colors = (1, 2, 3, 4, 5, 6)
+            for idx, level in enumerate(spec.isochrone_hours):
+                layer = f"MVE-ISOCHRONE-{level:g}H".replace(".", "_")
+                color = iso_colors[idx % len(iso_colors)]
+                label = f"{level:g}時間"
+                for points, closed in iso.get(level, []):
+                    pen.polyline(points, layer, color, close=closed)
+                    if points:
+                        pen.text(label, points[0], span * 0.02, layer, color)
 
     # 逆日影：屋根越し／棟状パターンの棟（稜線）
     if result.roof_spec is not None and result.area is not None:

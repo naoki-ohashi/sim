@@ -1,10 +1,12 @@
 """プロジェクト設定（YAML）の読み込み.
 
-敷地の与え方は3通りあり、どれか1つを指定します。
+敷地の与え方は5通りあり、どれか1つを指定します。
 
     site.points     … 頂点座標を直接書く
     site.rectangle  … 間口×奥行の長方形
     site.dxf        … DXFの敷地図を読み込む
+    site.json       … JSONの敷地図を読み込む（外部ツール連携用）
+    site.csv        … CSVの敷地図を読み込む（外部ツール連携用）
 
 例は examples/mve_sample.yaml を参照してください。
 """
@@ -16,6 +18,8 @@ import yaml
 
 from .io.dxf_pen import JWW_UNITS_PER_METER
 from .io.dxf_site import read_site_plan
+from .io.site_csv import read_site_plan_csv
+from .io.site_json import read_site_plan_json
 from .north import NorthReference
 from .optimizer import OptimizeOptions
 from .regulations.shadow import ShadowRegulationSpec
@@ -83,13 +87,40 @@ def _build_site(data: dict) -> tuple[Site, list[str]]:
                 wall_setback_m=data.get("wall_setback_m", 0.0),
             )
             notes.append("辺の種別はDXFのレイヤ名から推測しました。")
+    elif "json" in data:
+        js = data["json"]
+        plan = read_site_plan_json(js["path"], units_per_meter=js.get("units_per_meter", 1.0))
+        notes.extend(plan.notes)
+        points = plan.points
+        if edge_specs is None:
+            edge_specs = plan.edge_specs(
+                default_road_width_m=js.get("default_road_width_m", 6.0),
+                wall_setback_m=data.get("wall_setback_m", 0.0),
+            )
+            notes.append("辺の種別はJSONの内容から読み取りました。")
+    elif "csv" in data:
+        csv_cfg = data["csv"]
+        plan = read_site_plan_csv(
+            csv_cfg["path"], units_per_meter=csv_cfg.get("units_per_meter", 1.0),
+            encoding=csv_cfg.get("encoding", "utf-8-sig"),
+        )
+        notes.extend(plan.notes)
+        points = plan.points
+        if edge_specs is None:
+            edge_specs = plan.edge_specs(
+                default_road_width_m=csv_cfg.get("default_road_width_m", 6.0),
+                wall_setback_m=data.get("wall_setback_m", 0.0),
+            )
+            notes.append("辺の種別はCSVの内容から読み取りました。")
     elif "rectangle" in data:
         rect = data["rectangle"]
         points = _rectangle_points(rect["width_m"], rect["depth_m"])
     elif "points" in data:
         points = [tuple(p) for p in data["points"]]
     else:
-        raise ValueError("敷地は points / rectangle / dxf のいずれかで指定してください")
+        raise ValueError(
+            "敷地は points / rectangle / dxf / json / csv のいずれかで指定してください"
+        )
 
     if edge_specs is None:
         raise ValueError("edges（辺ごとの境界種別）を指定してください")
@@ -122,6 +153,9 @@ def _build_shadow(data: dict | None) -> ShadowRegulationSpec | None:
         time_step_minutes=data.get("time_step_minutes", 10.0),
         sample_interval_m=data.get("sample_interval_m", 2.0),
         apply_deemed_boundary=data.get("apply_deemed_boundary", True),
+        isochrone_hours=list(data.get("isochrone_hours", [])),
+        isochrone_grid_interval_m=data.get("isochrone_grid_interval_m", 2.0),
+        isochrone_margin_m=data.get("isochrone_margin_m"),
     )
 
 
