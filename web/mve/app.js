@@ -663,10 +663,10 @@
   rebuildEdgeInputs();
   updateFarNote();
   // サマリーは書式付きで自前に描くので、ビューア側の描画は止める。
-  // 方位記号は右上（#statusの計算結果パネルと重なる）を避けて右下に描く。
+  // 方位記号は右上（#statusの計算結果パネルと重なる）を避けて、その下に描く。
   window.JwcadVolumeViewer.init(
     { site: [], final: [], baseline: [], summary: [], radius: 1 },
-    { canvasId: 'c3d', summaryId: null, compassCorner: 'bottom-right' });
+    { canvasId: 'c3d', summaryId: null, compassTopOffset: 130 });
   switchTab('plan');
   run();
 })();
