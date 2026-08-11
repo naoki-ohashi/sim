@@ -272,7 +272,8 @@
 
   function drawNorth(w, h, angleDeg) {
     const [nx, ny] = E.northVector(angleDeg);
-    const cx = w - 42, cy = 42, r = 21;
+    // 右上は #status パネル（計算結果）と重なるので、左上の空きに置く
+    const cx = 42, cy = 42, r = 21;
     planCtx.strokeStyle = css('--border'); planCtx.lineWidth = 1;
     planCtx.beginPath(); planCtx.arc(cx, cy, r, 0, Math.PI * 2); planCtx.stroke();
     planCtx.strokeStyle = '#e05252'; planCtx.lineWidth = 2.2;
@@ -661,10 +662,11 @@
   toggleSky();
   rebuildEdgeInputs();
   updateFarNote();
-  // サマリーは書式付きで自前に描くので、ビューア側の描画は止める
+  // サマリーは書式付きで自前に描くので、ビューア側の描画は止める。
+  // 方位記号は右上（#statusの計算結果パネルと重なる）を避けて右下に描く。
   window.JwcadVolumeViewer.init(
     { site: [], final: [], baseline: [], summary: [], radius: 1 },
-    { canvasId: 'c3d', summaryId: null });
+    { canvasId: 'c3d', summaryId: null, compassCorner: 'bottom-right' });
   switchTab('plan');
   run();
 })();

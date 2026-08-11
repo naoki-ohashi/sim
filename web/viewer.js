@@ -28,6 +28,10 @@
   const show = { final: true, base: true, site: true, roads: true, shadow: true, isochrones: true };
   const ISOCHRONE_COLORS = ['#e05252', '#e0c34a', '#4ac96e', '#4ac9c9', '#4a7ee0', '#c94ae0'];
 
+  // 方位記号を描く角。既定は右上（Python版出力・旧Web版のレイアウトに合わせる）。
+  // 右上にHTMLパネルを置く画面（MVE入力UIの計算結果パネル）は右下に変えられる。
+  let compassCorner = 'top-right';
+
   // --- 投影 -----------------------------------------------------------
   // Python側 mesh.Axonometric と同じ式。方位角は真北から時計回り。
   function makeProjector(az, el) {
@@ -188,7 +192,8 @@
     let dx = n[0] - o[0], dy = -(n[1] - o[1]);
     const len = Math.hypot(dx, dy) || 1;
     dx /= len; dy /= len;
-    const ox = cw - 52, oy = 62, r = 22;
+    const r = 22, margin = 30;
+    const ox = cw - margin - r, oy = compassCorner === 'bottom-right' ? ch - margin - r : margin + r;
     ctx.strokeStyle = getComputedStyle(document.body).getPropertyValue('--border');
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.arc(ox, oy, r, 0, Math.PI * 2); ctx.stroke();
@@ -281,9 +286,11 @@
   }
 
   /* options（すべて省略可）:
-   *   canvasId  … 描画先のcanvas要素のid（既定 'c'）
-   *   summaryId … サマリーを書き込む要素のid。null を渡すと書き込まない
-   *               （呼び出し側で書式を付けて描きたい場合に使う）
+   *   canvasId      … 描画先のcanvas要素のid（既定 'c'）
+   *   summaryId     … サマリーを書き込む要素のid。null を渡すと書き込まない
+   *                   （呼び出し側で書式を付けて描きたい場合に使う）
+   *   compassCorner … 方位記号を描く角。'top-right'（既定）か 'bottom-right'。
+   *                   右上に別のHTMLパネルがある画面用。
    * 既存の呼び出し（Python版の出力・旧Web版）は引数なしなので、既定値で
    * これまで通り動く。
    */
@@ -291,6 +298,7 @@
     if (initialData) DATA = initialData;
     const opts = options || {};
     if ('summaryId' in opts) summaryId = opts.summaryId;
+    if ('compassCorner' in opts) compassCorner = opts.compassCorner;
     canvas = document.getElementById(opts.canvasId || 'c');
     if (!canvas) throw new Error('canvas が見つかりません: ' + (opts.canvasId || 'c'));
     ctx = canvas.getContext('2d');
