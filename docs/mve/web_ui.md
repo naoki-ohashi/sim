@@ -9,7 +9,7 @@ Pythonのインストールもコマンド入力も不要で、**ブラウザだ
 python3 tools/build_mve_web.py
 ```
 
-`dist/MVE敷地入力.html` が1つできます（約250KB。大半はDXF書き出し用の
+`dist/MVE.html` が1つできます（約250KB。大半はDXF書き出し用の
 Shift_JIS変換テーブルです）。これを**ダブルクリック**
 するだけです。USBメモリで持ち歩いても、メールで送っても動きます。
 

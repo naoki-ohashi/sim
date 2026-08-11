@@ -14,7 +14,7 @@
 インストール不要のブラウザ版UIがあります（推奨）。
 
 ```bash
-python3 tools/build_mve_web.py     # dist/MVE敷地入力.html をダブルクリック
+python3 tools/build_mve_web.py     # dist/MVE.html をダブルクリック
 ```
 
 コマンド版（DXF図面が必要な場合）:

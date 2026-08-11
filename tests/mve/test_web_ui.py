@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-DIST = ROOT / "dist" / "MVE敷地入力.html"
+DIST = ROOT / "dist" / "MVE.html"
 CHROMIUM = "/opt/pw-browsers/chromium"
 
 pytestmark = pytest.mark.skipif(

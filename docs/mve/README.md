@@ -11,7 +11,7 @@
 ### A. ブラウザだけ（インストール不要・おすすめ）
 
 ```bash
-python3 tools/build_mve_web.py     # dist/MVE敷地入力.html ができます
+python3 tools/build_mve_web.py     # dist/MVE.html ができます
 ```
 
 出来たHTMLをダブルクリックすると入力画面が開きます。フォームに敷地条件を

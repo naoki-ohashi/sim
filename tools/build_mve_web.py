@@ -3,7 +3,7 @@
     python3 tools/build_mve_web.py
 
 出来上がるもの:
-    dist/MVE敷地入力.html   … これ1つで動く（ダブルクリックで開く）
+    dist/MVE.html   … これ1つで動く（ダブルクリックで開く）
 
 web/mve/ は保守しやすいようファイルを分けてありますが、配布用には
 1ファイルの方が扱いやすいので結合します。通信は一切しないので、
@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
 MVE = WEB / "mve"
-OUT = ROOT / "dist" / "MVE敷地入力.html"
+OUT = ROOT / "dist" / "MVE.html"
 
 # index.html の <script src=...> と同じ順番で結合する
 SCRIPTS = [MVE / "engine.js", MVE / "optimizer.js", MVE / "isochrone.js",
