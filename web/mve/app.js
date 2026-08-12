@@ -317,23 +317,19 @@
       }
     }
 
-    // 斜線制限のエンベロープ（比較用）を階段状に作る
+    // 斜線制限のエンベロープ（比較用）。実際の斜線制限（道路・隣地・北側＋
+    // 絶対高さ）だけから求める（Python版 regulations/sky_ratio.reference_building
+    // 相当）。area.cells の heightLimitM は使わない — 天空率検討時
+    // （use_sky_ratio: true）は斜線制限が外れて絶対高さ制限だけになるため、
+    // メッシュ側の heightLimitM から作るとエンベロープが正しい形にならない。
     const envelope = [];
-    const fh = site.floorHeightM;
-    const topLimit = Math.max(...result.area.cells.map(c => isFinite(c.heightLimitM) ? c.heightLimitM : 0), fh);
-    const layers = 14;
-    for (let k = 0; k < layers; k++) {
-      const zb = (topLimit * k) / layers, zt = (topLimit * (k + 1)) / layers;
-      for (const cell of result.area.cells) {
-        if (cell.heightLimitM <= zb + 1e-9) continue;
-        const ring = cell.rect.map(p => T(p[0], p[1]));
-        const top = Math.min(zt, cell.heightLimitM);
-        if (top <= zb) continue;
-        envelope.push({ k: 'top', v: ring.map(p => [p[0], p[1], top]) });
-        for (let i = 0; i < ring.length; i++) {
-          const p = ring[i], q = ring[(i + 1) % ring.length];
-          envelope.push({ k: 'wall', v: [[p[0], p[1], zb], [q[0], q[1], zb], [q[0], q[1], top], [p[0], p[1], top]] });
-        }
+    for (const block of E.referenceBuilding(site, 16)) {
+      const ring = block.ring.map(p => T(p[0], p[1]));
+      const zb = block.zBottom, zt = block.zTop;
+      envelope.push({ k: 'top', v: ring.map(p => [p[0], p[1], zt]) });
+      for (let i = 0; i < ring.length; i++) {
+        const p = ring[i], q = ring[(i + 1) % ring.length];
+        envelope.push({ k: 'wall', v: [[p[0], p[1], zb], [q[0], q[1], zb], [q[0], q[1], zt], [p[0], p[1], zt]] });
       }
     }
 
