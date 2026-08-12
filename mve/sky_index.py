@@ -29,9 +29,11 @@ r が無限大（半直線がCを通らない）なら仰角0、つまり空が�
 
 ## 適合建築物（Pr）
 
-Pr は斜線制限ぎりぎりの適合建築物から求めます。こちらは任意形状の多角形
-なのでインデックス化せず、`sky_ratio.sky_ratio_percent` で1回だけ計算して
-保持します。最適化中に変化しないためです。
+Pr は斜線制限ぎりぎりの適合建築物から求めます。適合建築物は道路・隣地・
+北側で別々です（令135条の5〜7、`regulations/sky_ratio.reference_buildings`）
+——測定点の区分（`kinds[i]`）に応じて対応する適合建築物と比較します。
+こちらは任意形状の多角形なのでインデックス化せず、`sky_ratio.sky_ratio_percent`
+で1回だけ計算して保持します。最適化中に変化しないためです。
 
 ## 近似について
 
@@ -56,7 +58,7 @@ from .mesh import BuildableArea
 from .regulations.sky_ratio import (
     azimuths_deg,
     measurement_points,
-    reference_building,
+    reference_buildings,
     sky_ratio_percent,
 )
 from .shadow_index import _ray_entry_distances
@@ -182,16 +184,21 @@ def build_sky_index(
     interval_m: float = DEFAULT_INTERVAL_M,
     n_azimuth: int = DEFAULT_N_AZIMUTH,
     measurement_height_m: float = 0.0,
-    reference: list[Block] | None = None,
+    reference: dict[str, list[Block]] | None = None,
     azimuth_offset_ratio: float = AZIMUTH_OFFSET_RATIO,
 ) -> SkyIndex:
-    """入射距離のインデックスを作り、適合建築物の天空率を求める。"""
+    """入射距離のインデックスを作り、適合建築物の天空率を求める。
+
+    `reference` は区分（road/adjacent/north）ごとの適合建築物の辞書です
+    （令135条の5〜7、`regulations.sky_ratio.reference_buildings`）。省略時は
+    敷地から自動生成します。
+    """
     boxes = np.array(
         [list(cell.polygon.bounds) for cell in area.cells], dtype=float
     ).reshape(-1, 4)
 
     if reference is None:
-        reference = reference_building(site)
+        reference = reference_buildings(site)
 
     samples = measurement_points(site, interval_m)
     points = [p for p, _, _ in samples]
@@ -212,8 +219,9 @@ def build_sky_index(
                 table[ai] = _ray_entry_distances(origin, direction, boxes)
         distances.append(table)
         # Pr は形が変わらないので1回だけ。Ps と同じ方位でサンプリングする。
+        # 測定点の区分に対応する適合建築物と比較する（令135条の5〜7）。
         pr[i] = sky_ratio_percent(
-            (point[0], point[1], measurement_height_m), reference,
+            (point[0], point[1], measurement_height_m), reference.get(kinds[i], []),
             n_azimuth, azimuth_offset_ratio)
 
     return SkyIndex(

@@ -420,7 +420,10 @@
     return values.length ? Math.max(...values) * 1.5 : 120.0;
   }
 
-  // 適合建築物（斜線制限ぎりぎりの建物）を階段状に近似する
+  // 適合建築物（斜線制限ぎりぎりの建物）を階段状に近似する。3D表示用の
+  // 統合エンベロープに使う。Ps/Pr の適合判定そのものには使わない — 判定は
+  // 道路・隣地・北側それぞれ独立の適合建築物（referenceBuildingForKind）を
+  // 使う（令135条の5〜7）。
   function referenceBuilding(site, nLayers) {
     nLayers = nLayers || 20;
     const top = maxRelevantHeight(site);
@@ -436,6 +439,72 @@
       previous = zTop;
     }
     return blocks;
+  }
+
+  const SKY_RATIO_KINDS = ['road', 'adjacent', 'north'];
+
+  // kind（road/adjacent/north）だけの高さ制限で見た、必要な後退距離。
+  // 令135条の5〜7: 道路・隣地・北側それぞれの適合建築物は、その区分の
+  // 高さ制限だけに従う。他の2区分の辺はこの区分では無制限として扱う。
+  function requiredSetbackForKind(site, edgeIndex, heightM, kind) {
+    const edge = site.edges[edgeIndex];
+    if (kind === 'road') {
+      if (edge.kind !== 'road') return 0;
+      return roadRequiredSetback(site, edgeIndex, heightM);
+    }
+    if (kind === 'adjacent') {
+      if (edge.kind !== 'adjacent') return 0;
+      return adjacentRequiredSetback(site, edgeIndex, heightM);
+    }
+    if (kind === 'north') {
+      if (!northEdgeIndices(site).includes(edgeIndex)) return 0;
+      return northRequiredSetback(site, edgeIndex, heightM);
+    }
+    throw new Error('unknown sky-ratio kind: ' + kind);
+  }
+
+  // 高さ height_m において kind の高さ制限だけを満たす平面領域
+  function buildableRingAtHeightForKind(site, heightM, kind) {
+    const distances = site.edges.map((_e, i) => requiredSetbackForKind(site, i, heightM, kind));
+    return offsetPolygonByEdgeDistances(site.points, distances);
+  }
+
+  // kind だけの高さ制限で見た、検討する高さの上限。他の区分に制約されない
+  // ぶん maxRelevantHeight（3区分＋絶対高さの共通部分）より高くなることがある
+  function maxHeightForKind(site, kind) {
+    if (site.zoning.absoluteHeightLimitM != null) return site.zoning.absoluteHeightLimitM;
+    const heightFn = kind === 'road' ? roadHeightLimit
+      : kind === 'adjacent' ? adjacentHeightLimit : northHeightLimit;
+    const cx = site.points.reduce((s, p) => s + p[0], 0) / site.points.length;
+    const cy = site.points.reduce((s, p) => s + p[1], 0) / site.points.length;
+    const probes = site.points.concat([[cx, cy]]);
+    const values = probes.map(p => heightFn(site, p)).filter(v => isFinite(v));
+    return values.length ? Math.max(...values) * 1.5 : 120.0;
+  }
+
+  // kind（road/adjacent/north）の高さ制限だけに適合する適合建築物（令135条の5〜7）
+  function referenceBuildingForKind(site, kind, nLayers) {
+    nLayers = nLayers || 20;
+    const top = maxHeightForKind(site, kind);
+    if (top <= 0) return [];
+    const blocks = [];
+    let previous = 0;
+    for (let k = 0; k < nLayers; k++) {
+      const zTop = (top * (k + 1)) / nLayers;
+      const ring = buildableRingAtHeightForKind(site, previous, kind);
+      if (ring && ring.length >= 3 && polygonArea(ring) > 1e-6) {
+        blocks.push({ ring, zBottom: previous, zTop });
+      }
+      previous = zTop;
+    }
+    return blocks;
+  }
+
+  // 道路・隣地・北側、それぞれ独立の適合建築物（令135条の5〜7）
+  function referenceBuildings(site, nLayers) {
+    const out = {};
+    for (const kind of SKY_RATIO_KINDS) out[kind] = referenceBuildingForKind(site, kind, nLayers);
+    return out;
   }
 
   // ===== 天空率（法56条7項、令135条の5〜11。Python版 sky_ratio.py 相当） =========
@@ -553,7 +622,8 @@
     nAzimuth = nAzimuth || DEFAULT_SKY_N_AZIMUTH;
     measurementHeightM = measurementHeightM || 0;
     azimuthOffsetRatio = azimuthOffsetRatio != null ? azimuthOffsetRatio : SKY_AZIMUTH_OFFSET_RATIO;
-    if (!reference) reference = referenceBuilding(site);
+    // reference は区分（road/adjacent/north）ごとの適合建築物の辞書（令135条の5〜7）
+    if (!reference) reference = referenceBuildings(site);
 
     const nCells = area.cells.length;
     const boxes = area.cells.map(c => c.bounds);
@@ -580,7 +650,9 @@
         });
       }
       distances.push(table);
-      pr[i] = skyRatioPercent([point[0], point[1], measurementHeightM], reference, nAzimuth, azimuthOffsetRatio);
+      // 測定点の区分に対応する適合建築物と比較する（令135条の5〜7）
+      const refForKind = reference[kinds[i]] || [];
+      pr[i] = skyRatioPercent([point[0], point[1], measurementHeightM], refForKind, nAzimuth, azimuthOffsetRatio);
     });
 
     return {
@@ -911,6 +983,8 @@
     rayBoxEntry, buildShadowIndex, hoursAt, worstViolation, isShadowCompliant, shadowSummary,
     roadRequiredSetback, adjacentRequiredSetback, northRequiredSetback,
     requiredSetbackForHeight, buildableRingAtHeight, maxRelevantHeight, referenceBuilding,
+    requiredSetbackForKind, buildableRingAtHeightForKind, maxHeightForKind,
+    referenceBuildingForKind, referenceBuildings, SKY_RATIO_KINDS,
     rayPolygonEntryDistance, silhouetteElevationRad, azimuthsDeg, skyRatioPercent,
     skyMeasurementPoints, buildSkyIndex, skyPsAt, skyWorst, skyIsCompliant, skyRidgeCells,
     skySummary, DEFAULT_SKY_INTERVAL_M, DEFAULT_SKY_N_AZIMUTH, SKY_AZIMUTH_OFFSET_RATIO,

@@ -109,6 +109,61 @@ def test_only_ridge_cells_affect_a_measurement_point():
         assert index.ps_at(point_index, trial) == pytest.approx(base, abs=1e-9)
 
 
+# === 適合建築物は道路・隣地・北側で別々（令135条の5〜7） ==============
+
+def test_reference_buildings_differ_by_kind():
+    """道路・隣地・北側の適合建築物は別々の形状（3区分の共通部分ではない）。
+
+    道路用の適合建築物は隣地・北側の後退を考慮しないため、それぞれ独立に
+    作った建築物は一般に高さ方向の広がりが異なります。
+    """
+    site = _site(zone="1mid", road=6.0)  # 隣地斜線・北側斜線とも適用される地域
+    refs = sky_ratio.reference_buildings(site)
+    assert set(refs) == {"road", "adjacent", "north"}
+    assert all(refs[kind] for kind in refs), "3区分とも適合建築物が空でないこと"
+
+    tops = {kind: max(b.z_top for b in blocks) for kind, blocks in refs.items()}
+    assert len(set(tops.values())) > 1, \
+        f"3区分の適合建築物が同じ高さ止まりになっている: {tops}"
+
+
+def test_measurement_points_use_the_matching_reference_building():
+    """`check()` の Pr は測定点の区分に対応する適合建築物から来ている。
+
+    道路の測定点の Pr を隣地用の適合建築物で計算し直すと値が変わることで、
+    実際に区分ごとに別の適合建築物が使われていることを確認する。
+    """
+    site = _site(zone="1mid", road=6.0)
+    checks = sky_ratio.check(site, [], interval_m=INTERVAL, n_azimuth=N_AZIMUTH)
+    by_kind = {"road": [], "adjacent": [], "north": []}
+    for c in checks:
+        by_kind[c.kind].append(c)
+    assert all(by_kind[kind] for kind in by_kind), "道路・隣地・北側すべての測定点があること"
+
+    refs = sky_ratio.reference_buildings(site)
+    sample = by_kind["road"][0]
+    p3 = (sample.point[0], sample.point[1], 0.0)
+    pr_with_adjacent_ref = sky_ratio.sky_ratio_percent(p3, refs["adjacent"], N_AZIMUTH, 0.0)
+    assert sample.pr == pytest.approx(
+        sky_ratio.sky_ratio_percent(p3, refs["road"], N_AZIMUTH, 0.0))
+    assert sample.pr != pytest.approx(pr_with_adjacent_ref)
+
+
+def test_sky_index_pr_matches_check_per_kind():
+    """`build_sky_index` の Pr（配列）が `check()` の Pr（区分別）と一致する。"""
+    site = _site(zone="1mid", road=6.0)
+    area = build_mesh(site, cell_size_x_m=CELL, cell_size_y_m=CELL)
+    assign_height_limits(area)
+    index = build_sky_index(site, area, interval_m=INTERVAL, n_azimuth=N_AZIMUTH,
+                            azimuth_offset_ratio=0.0)
+    checks = sky_ratio.check(site, [], interval_m=INTERVAL, n_azimuth=N_AZIMUTH,
+                             azimuth_offset_ratio=0.0)
+    assert len(index.points) == len(checks)
+    for i, c in enumerate(checks):
+        assert index.kinds[i] == c.kind
+        assert float(index.pr[i]) == pytest.approx(c.pr, abs=1e-6)
+
+
 # === 最適化への接続 ==================================================
 
 def test_result_is_verified_compliant_by_an_independent_check():
