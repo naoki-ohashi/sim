@@ -415,6 +415,7 @@ Pr（適合建築物の天空率）以上になるまで、足りない点の稜
 | `MVE-FLOORS` | 各マスの階数 |
 | `MVE-PLAN-n` | n階の平面輪郭 |
 | `MVE-SHADOW-5M` / `-10M` | 日影の測定線 |
+| `MVE-ISOCHRONE-{時間}H` | 等時間日影線（`isochrone_hours` を指定したときのみ） |
 | `MVE-NORTH` | 真北記号 |
 | `MVE-RIDGE` | 逆日影（屋根越し・棟状パターン）の棟の位置 |
 | `MVE-SUMMARY` | 計算結果の要約 |
