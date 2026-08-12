@@ -19,6 +19,12 @@
   let lastIsochroneHours = [];
   let lastIsochrones = null;
 
+  // 平面図のズーム・パン（ホイールでズーム）。null は「自動フィット」を表す。
+  let planZoom = 1;
+  let planCenter = null;
+  let lastPlanView = null; // 直近に描いた変換パラメータ（ホイールでのズーム中心計算に使う）
+  const resetPlanView = () => { planZoom = 1; planCenter = null; };
+
   // ===== 入力の読み取り ===============================================
   function sitePoints() {
     if ($('shape-mode').value === 'rect') {
@@ -195,11 +201,13 @@
     const minx = Math.min(...xs), maxx = Math.max(...xs);
     const miny = Math.min(...ys), maxy = Math.max(...ys);
     const pad = 56;
-    const scale = Math.min((w - pad * 2) / Math.max(maxx - minx, 1e-6),
-                           (h - pad * 2) / Math.max(maxy - miny, 1e-6));
-    const ox = (w - (maxx - minx) * scale) / 2 - minx * scale;
-    const oy = (h + (maxy - miny) * scale) / 2 + miny * scale;
-    const T = p => [ox + p[0] * scale, oy - p[1] * scale];
+    const baseScale = Math.min((w - pad * 2) / Math.max(maxx - minx, 1e-6),
+                               (h - pad * 2) / Math.max(maxy - miny, 1e-6));
+    const scale = baseScale * planZoom;
+    const cx0 = planCenter ? planCenter.x : (minx + maxx) / 2;
+    const cy0 = planCenter ? planCenter.y : (miny + maxy) / 2;
+    const T = p => [w / 2 + (p[0] - cx0) * scale, h / 2 - (p[1] - cy0) * scale];
+    lastPlanView = { baseScale, cx0, cy0, w, h };
 
     const path = (pts, close) => {
       planCtx.beginPath();
@@ -475,6 +483,7 @@
   }
 
   function fromYaml(text) {
+    resetPlanView();
     const num = re => { const m = text.match(re); return m ? parseFloat(m[1]) : null; };
     const str = re => { const m = text.match(re); return m ? m[1].trim() : null; };
 
@@ -558,6 +567,7 @@
   function applyImportedSite(imported) {
     const { points, edges, notes } = imported;
     if (points.length < 3) throw new Error('敷地の頂点が3つ以上必要です');
+    resetPlanView();
     $('shape-mode').value = 'poly';
     $('poly-points').value = points.map(p => `${p[0]},${p[1]}`).join('\n');
     toggleShapeMode();
@@ -616,8 +626,8 @@
     if (view === 'plan') drawPlan(); else window.JwcadVolumeViewer.resize();
   }
 
-  $('shape-mode').addEventListener('change', () => { toggleShapeMode(); rebuildEdgeInputs(); drawPlan(); });
-  $('poly-points').addEventListener('change', () => { rebuildEdgeInputs(); drawPlan(); });
+  $('shape-mode').addEventListener('change', () => { resetPlanView(); toggleShapeMode(); rebuildEdgeInputs(); drawPlan(); });
+  $('poly-points').addEventListener('change', () => { resetPlanView(); rebuildEdgeInputs(); drawPlan(); });
   $('shadow-on').addEventListener('change', toggleShadow);
   $('sky-on').addEventListener('change', toggleSky);
   $('run').addEventListener('click', run);
@@ -656,6 +666,23 @@
     } catch (err) { alert('DXFの書き出しに失敗しました: ' + err.message); }
   });
   window.addEventListener('resize', () => { drawPlan(); window.JwcadVolumeViewer.draw(); });
+
+  // 平面図はホイールでズーム（カーソル位置を中心に拡大縮小する）
+  planCanvas.addEventListener('wheel', ev => {
+    ev.preventDefault();
+    if (!lastPlanView) return;
+    const { baseScale, cx0, cy0, w, h } = lastPlanView;
+    const rect = planCanvas.getBoundingClientRect();
+    const mx = ev.clientX - rect.left, my = ev.clientY - rect.top;
+    const oldScale = baseScale * planZoom;
+    const worldX = cx0 + (mx - w / 2) / oldScale;
+    const worldY = cy0 - (my - h / 2) / oldScale;
+
+    planZoom = Math.max(0.4, Math.min(20, planZoom * (ev.deltaY < 0 ? 1.15 : 1 / 1.15)));
+    const newScale = baseScale * planZoom;
+    planCenter = { x: worldX - (mx - w / 2) / newScale, y: worldY + (my - h / 2) / newScale };
+    drawPlan();
+  }, { passive: false });
 
   toggleShapeMode();
   toggleShadow();
