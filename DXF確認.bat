@@ -30,7 +30,7 @@ for %%C in ("py -3" "python" "python3") do (
 
 if not defined PY (
     echo [エラー] Python が見つかりませんでした。
-    echo MVE実行.bat と同じ手順でPythonを入れてください。
+    echo MVCE実行.bat と同じ手順でPythonを入れてください。
     echo.
     pause
     exit /b 1

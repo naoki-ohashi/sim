@@ -1,0 +1,122 @@
+# MVCE 設定ファイルの例
+#
+# 30m x 20m の敷地。南に6m道路、東西が隣地、北は水路（幅4m）に接する想定。
+# 数値はすべて例です。実際の敷地では都市計画図と自治体の条例で確認してください。
+
+site:
+  name: サンプル敷地
+
+  # --- 敷地の形（points / rectangle / dxf / json / csv のいずれか）----
+  # 頂点は反時計回り。単位はm。+X=図面の右、+Y=図面の上。
+  points:
+    - [0, 0]
+    - [30, 0]
+    - [30, 20]
+    - [0, 20]
+
+  # 長方形で指定する場合:
+  # rectangle:
+  #   width_m: 30      # 間口（X方向）
+  #   depth_m: 20      # 奥行（Y方向）
+
+  # DXFの敷地図を読み込む場合:
+  # dxf:
+  #   path: 敷地図.dxf
+  #   layer: 敷地          # 省略すると全レイヤから探す
+  #   units_per_meter: 1   # mmで作図しているなら 1000
+  #   default_road_width_m: 6
+
+  # 外部ツール（測量ソフト等）が出力したJSON/CSVを読み込む場合:
+  # json:
+  #   path: 敷地図.json     # {"points": [[x,y],...], "edges": [{"kind":...},...]}
+  #   default_road_width_m: 6
+  # csv:
+  #   path: 敷地図.csv       # 1行1頂点。x,y列必須、kind等の列は任意
+  #   encoding: shift_jis    # Excelで保存したCSVの場合
+  #   default_road_width_m: 6
+
+  # --- 真北 -----------------------------------------------------------
+  # 真北が図面の上(+Y)からどれだけ反時計回りにずれているか（度）。
+  # 0 なら図面の上が真北。北側斜線と日影計算はこの向きを基準にします。
+  north_angle_deg: 0
+
+  # --- 壁面後退距離（全辺の既定値）------------------------------------
+  # 建物を境界線から下げる距離。斜線制限の後退緩和と天空率の両方に効きます。
+  # 辺ごとに変えたい場合は edges の中で個別に指定してください。
+  wall_setback_m: 1.0
+
+  # --- 各辺の境界種別（頂点の順番に対応）------------------------------
+  edges:
+    - kind: road            # 南側: 前面道路
+      road_width_m: 6.0
+      wall_setback_m: 1.5   # この辺だけ後退距離を変える例
+    - kind: adjacent        # 東側: 隣地
+    - kind: adjacent        # 北側: 隣地だが水路に接する
+      relaxation:
+        kind: water         # park（公園・広場）/ water（水面）/ railway（線路敷）
+        width_m: 4.0
+      # 敷地の地盤面が隣地より低い場合の高低差（1m以上で緩和が効きます）
+      # ground_level_diff_m: 0
+    - kind: adjacent        # 西側: 隣地
+
+  # --- 用途地域など ---------------------------------------------------
+  zoning:
+    zone_type: 1res         # 選択肢は mvce/zoning.py の ZONE_LABELS_JA を参照
+    far_ratio: 200          # 容積率(%)。比(2.0)で書いてもOK
+    coverage_ratio: 60      # 建蔽率(%)
+    # absolute_height_limit_m: 10   # 低層住居専用等の絶対高さ制限
+
+  floor_height_m: 3.2
+
+# --- メッシュ（ボクセルの割り付け）------------------------------------
+mesh:
+  cell_size_x_m: 3.0        # X方向の幅
+  cell_size_y_m: 3.0        # Y方向の幅
+  mesh_angle_deg: 0         # 道路に平行に割り付けたい場合などに回転
+  coverage_threshold: 0.5   # マスの何割が外郭線に入っていれば採用するか
+  # 天空率（法56条7項）で斜線制限に代える場合は true。
+  # 斜線制限を外したうえで Ps ≧ Pr を全測定点で確認し、足りなければ
+  # 原因になっているマスだけを下げます。壁面後退を取った敷地ほど有利です。
+  use_sky_ratio: false
+  sky_ratio_interval_m: 4.0   # 測定点の間隔(m)。細かくすると厳しく・遅くなる
+  sky_ratio_n_azimuth: 72     # 天空を何方位で刻むか
+
+  # 日影規制への対応方法。
+  #   voxel   … マスごとに独立に下げる自由形（既定・最も容積を稼げる）
+  #   lean_to … 逆日影・屋根越しパターン（片流れ）。規則正しい量塊になる
+  #   ridge   … 逆日影・棟状パターン（切妻）。lean_to を含む一般形
+  # 棟の向きは、日影規制を最も厳しくしている太陽方位に自動でアンカーして
+  # 探索します（roof_angle_span_deg の範囲）。
+  envelope_family: voxel
+  # roof_angle_span_deg: 15.0   # 棟の向きを探索する範囲（臨界方位を中心に±この角度）
+  # roof_angle_step_deg: 7.5
+  # roof_offset_steps: 7        # 棟位置の候補数（ridgeのみ）
+  # roof_pitch_candidates_deg: [20.0, 27.0, 35.0, 45.0]       # 日影の厳しい側の勾配候補
+  # roof_far_pitch_candidates_deg: [0.0, 20.0, 35.0]          # 反対側（0=制限なし）
+  # roof_fixed_low_azimuth_deg: null   # 棟の向きを固定したい場合に指定（探索を省略）
+
+# --- 日影規制 ----------------------------------------------------------
+# このセクションを消すと日影のチェックを省略します。
+# 測定面と規制時間は条例で決まります。必ず確認してください。
+shadow:
+  measurement_height_m: 4.0   # 1.5 / 4.0 / 6.5 のいずれか
+  line_5m_max_hours: 5.0      # 5m超10m以内の規制時間
+  line_10m_max_hours: 3.0     # 10m超の規制時間
+  latitude_deg: 35.7
+  hokkaido: false             # true なら真太陽時9時〜15時
+  time_step_minutes: 10.0
+  sample_interval_m: 2.0
+  apply_deemed_boundary: true # 令135条の12第3項のみなし境界線を使う
+  # isochrone_hours: [2.0, 3.0, 4.0, 5.0]   # 等時間日影線（未指定なら作図しない）
+  # isochrone_grid_interval_m: 2.0          # 等時間日影線を求めるグリッドの間隔(m)
+  # isochrone_margin_m:                     # 省略すると建物高さから自動計算
+
+output:
+  dxf_path: mvce_result.dxf
+  html_path: mvce_result.html
+  draw_mesh: true
+  draw_floor_labels: true
+  # DXFは JW-CAD が読める形式（R12・LINEとTEXTのみ・mm）で書き出します。
+  # 1mを何単位で書くか。JW-CADはmmなので既定の1000のままで構いません。
+  # mで作図している図面に合わせたい場合だけ 1 にしてください。
+  dxf_units_per_meter: 1000

@@ -1,26 +1,26 @@
-# MVE / jwcad-volume
+# MVCE / jwcad-volume
 
 このリポジトリには2つのパッケージがあります。
 
 | | 用途 | 状態 |
 |---|---|---|
-| **`mve/`** | 日影規制・斜線制限をふまえた最大容積の計算エンジン | **現行**。日影対応をボクセル法で作り直し、複数前面道路・各種緩和・真北・測定面選択に対応 |
-| `jwcad_volume/` | JW-CAD外部変形連携（JWC形式・バッチ・exe化） | 実績があるため維持。計算エンジンとしてはMVEが後継 |
+| **`mvce/`** | 日影規制・斜線制限をふまえた最大容積の計算エンジン | **現行**。日影対応をボクセル法で作り直し、複数前面道路・各種緩和・真北・測定面選択に対応 |
+| `jwcad_volume/` | JW-CAD外部変形連携（JWC形式・バッチ・exe化） | 実績があるため維持。計算エンジンとしてはMVCEが後継 |
 
-**MVEの操作手順は [`docs/mve/manual.md`](docs/mve/manual.md)（取扱説明書）、
-概要は [`docs/mve/README.md`](docs/mve/README.md)、設計の全体像は
-[`docs/mve/design_spec.md`](docs/mve/design_spec.md)（設計仕様書）を参照してください。**
+**MVCEの操作手順は [`docs/mvce/manual.md`](docs/mvce/manual.md)（取扱説明書）、
+概要は [`docs/mvce/README.md`](docs/mvce/README.md)、設計の全体像は
+[`docs/mvce/design_spec.md`](docs/mvce/design_spec.md)（設計仕様書）を参照してください。**
 
 インストール不要のブラウザ版UIがあります（推奨）。
 
 ```bash
-python3 tools/build_mve_web.py     # dist/MVE.html をダブルクリック
+python3 tools/build_mvce_web.py     # dist/MVCE.html をダブルクリック
 ```
 
 コマンド版（DXF図面が必要な場合）:
 
 ```bash
-mve examples/mve_sample.yaml
+mvce examples/mvce_sample.yaml
 ```
 
 以下は `jwcad_volume` の説明です。
