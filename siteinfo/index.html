@@ -1,0 +1,1386 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SiteInfo — 敷地情報取得エンジン</title>
+<link rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"
+      crossorigin="anonymous" referrerpolicy="no-referrer">
+<style>
+  :root {
+    --bg:#eef1f5; --panel:#fff; --text:#1b1f24; --muted:#5c6673; --border:#d3d9e2;
+    --accent:#1d5a7a; --accent-soft:#e1edf4; --warn:#b45309; --warn-soft:#fdf3e3;
+    --ok:#15803d; --err:#a0392d; --err-soft:#f7e6e3; --field:#fff; --site:#c1440e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#12151a; --panel:#1b1f26; --text:#e8ebef; --muted:#9aa4b2; --border:#2e3540;
+      --accent:#79b4d6; --accent-soft:#16262f; --warn:#fbbf24; --warn-soft:#2a2413;
+      --ok:#4ade80; --err:#db9585; --err-soft:#2e211e; --field:#12151a; --site:#e2703a;
+    }
+  }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; }
+  body {
+    background:var(--bg); color:var(--text); font-size:13.5px; overflow:hidden;
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Yu Gothic",Meiryo,system-ui,sans-serif;
+  }
+  #app { display:flex; height:100%; }
+
+  /* ---- 左：入力 ---- */
+  #left { width:392px; flex:none; overflow-y:auto; padding:16px 18px 40px; background:var(--panel);
+          border-right:1px solid var(--border); }
+  h1 { font-size:17px; margin:0 0 3px; }
+  h1 span { font-size:12px; font-weight:400; color:var(--muted); margin-left:7px; }
+  .lead { color:var(--muted); font-size:12px; line-height:1.65; margin:0 0 14px; }
+  fieldset { border:1px solid var(--border); border-radius:9px; margin:0 0 13px; padding:11px 13px; }
+  legend { font-weight:700; padding:0 5px; font-size:12.5px; color:var(--accent); }
+  .row { display:flex; align-items:center; gap:9px; margin:7px 0; }
+  .row > label { flex:1; color:var(--muted); line-height:1.4; }
+  .row .unit { color:var(--muted); font-size:12px; width:42px; flex:none; }
+  input[type=number], input[type=text], input[type=password], select {
+    width:124px; flex:none; font:inherit; padding:5px 7px; color:var(--text);
+    background:var(--field); border:1px solid var(--border); border-radius:6px;
+  }
+  select.wide, input.wide { width:186px; }
+  input.full { width:100%; }
+  .hint { color:var(--muted); font-size:11.5px; line-height:1.6; margin:6px 0 0; }
+  .hint.warn { color:var(--warn); }
+  .hint.err { color:var(--err); }
+  .hint.ok { color:var(--ok); }
+  button { font:inherit; padding:6px 12px; cursor:pointer; border-radius:7px;
+           color:var(--text); background:transparent; border:1px solid var(--border); }
+  button:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
+  button:disabled { opacity:.45; cursor:default; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); font-weight:700; }
+  button.primary:hover:not(:disabled) { filter:brightness(1.1); color:#fff; }
+  button.on { background:var(--accent-soft); border-color:var(--accent); color:var(--accent); font-weight:700; }
+  .btnrow { display:flex; flex-wrap:wrap; gap:7px; margin:8px 0 0; }
+  .btnrow.wide button { flex:1; white-space:nowrap; padding:6px 8px; }
+  .note { margin:9px 0 0; padding:8px 11px; border-radius:7px; font-size:11.5px; line-height:1.6;
+          background:var(--accent-soft); border:1px solid var(--border); color:var(--muted); }
+  .note.warn { background:var(--warn-soft); }
+  .note.err { background:var(--err-soft); }
+  .note b { color:var(--text); }
+  .sep { border:none; border-top:1px solid var(--border); margin:11px 0; }
+
+  /* 住所検索の候補 */
+  #hits { list-style:none; margin:8px 0 0; padding:0; max-height:172px; overflow-y:auto;
+          border:1px solid var(--border); border-radius:7px; display:none; }
+  #hits.show { display:block; }
+  #hits li { padding:6px 9px; cursor:pointer; border-bottom:1px solid var(--border); font-size:12px; }
+  #hits li:last-child { border-bottom:none; }
+  #hits li:hover { background:var(--accent-soft); color:var(--accent); }
+
+  /* ---- 右：地図とサマリー ---- */
+  #right { flex:1; min-width:0; display:flex; flex-direction:column; }
+  #maparea { flex:1; min-height:240px; position:relative; }
+  #map { position:absolute; inset:0; background:var(--bg); }
+  #maptools { position:absolute; z-index:500; right:10px; top:10px; display:flex; gap:6px; }
+  #maptools button { background:var(--panel); box-shadow:0 1px 5px rgba(0,0,0,.2); font-size:12px; }
+  #mapmsg { position:absolute; z-index:500; left:50%; transform:translateX(-50%); top:10px;
+            background:var(--panel); border:1px solid var(--accent); color:var(--accent);
+            border-radius:7px; padding:5px 13px; font-size:12px; font-weight:700;
+            box-shadow:0 1px 5px rgba(0,0,0,.2); display:none; }
+  #mapmsg.show { display:block; }
+
+  #summary { height:39%; min-height:150px; overflow-y:auto; border-top:1px solid var(--border);
+             background:var(--panel); padding:12px 16px 20px; }
+  #summary h2 { font-size:13px; margin:0 0 8px; color:var(--accent); }
+  table.sum { width:100%; border-collapse:collapse; font-size:12.5px; }
+  table.sum th, table.sum td { text-align:left; padding:5px 9px; border-bottom:1px solid var(--border);
+                               vertical-align:top; }
+  table.sum th { width:200px; color:var(--muted); font-weight:400; white-space:nowrap; }
+  table.sum td { font-variant-numeric:tabular-nums; }
+  table.sum td.na { color:var(--muted); }
+  table.sum td code { font-family:ui-monospace,Consolas,monospace; font-size:11.5px; color:var(--muted); }
+  table.sum tr.head th { color:var(--accent); font-weight:700; background:var(--bg); }
+
+  /* ---- PLATEAUモーダル ---- */
+  #plateau { position:fixed; inset:0; z-index:1000; background:rgba(0,0,0,.62); display:none; }
+  #plateau.show { display:flex; align-items:center; justify-content:center; }
+  #plateau-box { width:min(1180px,94vw); height:min(800px,92vh); background:var(--panel);
+                 border-radius:11px; display:flex; flex-direction:column; overflow:hidden; }
+  #plateau-head { display:flex; align-items:center; gap:12px; padding:9px 14px;
+                  border-bottom:1px solid var(--border); }
+  #plateau-head h2 { font-size:13.5px; margin:0; }
+  #plateau-head .status { flex:1; color:var(--muted); font-size:12px; }
+  #cesium { flex:1; min-height:0; background:#0b1016; position:relative; }
+  #cesium .credit { display:none; }
+  .cesium-widget-credits { font-size:10px; }
+
+  @media (max-width:960px) {
+    body { overflow:auto; }
+    #app { flex-direction:column; height:auto; }
+    #left { width:100%; border-right:none; border-bottom:1px solid var(--border); }
+    #maparea { height:60vh; flex:none; }
+    #summary { height:auto; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ==================== 左：入力 ==================== -->
+  <section id="left">
+    <h1>SiteInfo <span>敷地情報取得エンジン v0.1</span></h1>
+    <p class="lead">
+      敷地の<b>位置・形状・行政情報</b>を集めて、SIMワールド共通の
+      <b>敷地情報GeoJSON</b>（WGS84 / EPSG:4326）を書き出します。
+      HBU-ANALYZER・BVCE・MVEは、ここで作ったGeoJSONを入力として受け取ります。
+    </p>
+
+    <!-- ---------- STEP1 ---------- -->
+    <fieldset>
+      <legend>STEP1　位置と形状</legend>
+
+      <div class="row">
+        <label>敷地の名称</label>
+        <input type="text" id="site-name" class="wide" placeholder="例: 西新宿 A敷地">
+      </div>
+
+      <hr class="sep">
+
+      <div class="row">
+        <label>住所・地番で探す</label>
+      </div>
+      <div class="btnrow">
+        <input type="text" id="q" class="full" placeholder="例: 新宿区西新宿2-8-1"
+               style="flex:1; width:auto">
+        <button id="btn-search">検索</button>
+      </div>
+      <ul id="hits"></ul>
+      <p class="hint">国土地理院の住所検索APIを使います。地番までは出ない場合があります。</p>
+
+      <hr class="sep">
+
+      <div class="btnrow wide">
+        <button id="btn-draw">✏ 敷地を描く</button>
+        <button id="btn-finish" disabled>確定</button>
+        <button id="btn-clear">やり直し</button>
+      </div>
+      <div class="btnrow wide">
+        <button id="btn-info">🔍 地点情報モード</button>
+        <button id="btn-import">GeoJSONを読み込む</button>
+        <input type="file" id="file" accept=".geojson,.json,application/geo+json,application/json" hidden>
+      </div>
+      <p class="hint" id="draw-hint">
+        「敷地を描く」で地図をクリックすると頂点が増えます。3点以上で確定できます。
+        地点情報モードでは、クリックした地点の都市計画情報をポップアップで表示します。
+      </p>
+
+      <hr class="sep">
+
+      <div class="row">
+        <label>敷地面積（地図から算定）</label>
+        <input type="text" id="area-auto" class="wide" readonly placeholder="敷地未確定">
+      </div>
+      <div class="row">
+        <label>手入力で上書き</label>
+        <input type="number" id="area-manual" min="0" step="0.01" placeholder="確定測量図の値">
+        <span class="unit">m²</span>
+      </div>
+      <p class="hint">
+        地図からの面積は概算です（平均緯度基準の平面近似＋靴ひも公式）。
+        実務では確定測量図の値で上書きしてください。上書きの有無は
+        <code>area_is_manual</code> としてGeoJSONに記録されます。
+      </p>
+    </fieldset>
+
+    <!-- ---------- STEP2 ---------- -->
+    <fieldset>
+      <legend>STEP2　敷地条件・行政情報</legend>
+
+      <div class="row">
+        <label>reinfolib APIキー</label>
+        <input type="password" id="apikey" class="wide" placeholder="環境変数から自動取得">
+      </div>
+      <div class="btnrow wide">
+        <button id="btn-gis" class="primary">行政GISから取得</button>
+      </div>
+      <p class="hint" id="gis-status">敷地または地点を決めてから取得してください。</p>
+      <div class="note" id="host-note" style="display:none"></div>
+
+      <hr class="sep">
+
+      <div class="row">
+        <label>用途地域</label>
+        <select id="zone" class="wide"></select>
+      </div>
+      <div class="row">
+        <label>容積率（都市計画）</label>
+        <input type="number" id="far" min="0" step="10"><span class="unit">%</span>
+      </div>
+      <div class="row">
+        <label>建ぺい率</label>
+        <input type="number" id="bcr" min="0" max="100" step="5"><span class="unit">%</span>
+      </div>
+      <div class="row">
+        <label>地区計画</label>
+        <input type="text" id="district-plan" class="wide" placeholder="指定なし">
+      </div>
+      <div class="row">
+        <label>防火・準防火地域</label>
+        <input type="text" id="fire-zone" class="wide" placeholder="指定なし">
+      </div>
+      <div class="row">
+        <label>高度地区</label>
+        <input type="text" id="height-zone" class="wide" placeholder="指定なし">
+      </div>
+      <div class="row">
+        <label>想定地価</label>
+        <input type="number" id="land-price" min="0" step="1"><span class="unit">万/坪</span>
+      </div>
+
+      <hr class="sep">
+
+      <div class="row">
+        <label>前面道路幅員 <b>（手入力）</b></label>
+        <input type="number" id="road-width" min="0" step="0.1"><span class="unit">m</span>
+      </div>
+      <div class="row">
+        <label>最寄駅からの徒歩</label>
+        <input type="number" id="walk-min" min="0" step="1"><span class="unit">分</span>
+      </div>
+      <div class="row">
+        <label>日影規制 <b>（手入力）</b></label>
+        <select id="shadow" class="wide"></select>
+      </div>
+      <p class="hint warn">
+        道路幅員と日影規制は全国統一のAPIがありません（自治体条例によるため）。
+        道路台帳・自治体の日影規制表で確認してください。
+      </p>
+      <p class="hint" id="gis-links"></p>
+    </fieldset>
+
+    <!-- ---------- STEP3 ---------- -->
+    <fieldset>
+      <legend>STEP3　敷地情報GeoJSONの書き出し</legend>
+      <div class="btnrow wide">
+        <button id="btn-export" class="primary">GeoJSONを書き出す</button>
+        <button id="btn-copy">コピー</button>
+      </div>
+      <div class="btnrow wide">
+        <button id="btn-plateau">PLATEAUで3D表示</button>
+      </div>
+      <p class="hint" id="export-status">
+        右の「取得した敷地情報」が、そのまま書き出される内容です。
+      </p>
+    </fieldset>
+
+    <p class="hint">
+      都市計画情報は参考値です。正式な確認は自治体窓口で行ってください。
+      面積は測量に代わるものではありません。
+    </p>
+  </section>
+
+  <!-- ==================== 右：地図とサマリー ==================== -->
+  <section id="right">
+    <div id="maparea">
+      <div id="map"></div>
+      <div id="mapmsg"></div>
+      <div id="maptools">
+        <button id="btn-base">航空写真</button>
+      </div>
+    </div>
+    <div id="summary">
+      <h2>取得した敷地情報（書き出される内容）</h2>
+      <div id="sumbody"></div>
+    </div>
+  </section>
+</div>
+
+<!-- ==================== PLATEAU 3D ==================== -->
+<div id="plateau">
+  <div id="plateau-box">
+    <div id="plateau-head">
+      <h2>PLATEAU 3D都市モデル</h2>
+      <span class="status" id="plateau-status"></span>
+      <button id="plateau-close">閉じる</button>
+    </div>
+    <div id="cesium"></div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script>
+/* =====================================================================
+ * SiteInfo — 敷地情報取得エンジン
+ *
+ * HBU-ANALYZER v0.4のSTEP1から分離した独立エンジン。
+ * 敷地の位置・形状・行政情報を集め、SIMワールド共通の敷地情報GeoJSONを作る。
+ * 下流（HBU-ANALYZER / BVCE-V01(TOKYO) / MVE）は、このGeoJSONだけを受け取る。
+ *
+ * 依存: Leaflet（地図）/ CesiumJS（PLATEAU 3D・初回クリック時に遅延ロード）
+ * ホスト: Electron想定。window.envAPI / window.gisAPI があれば行政GISを使う。
+ * ===================================================================== */
+'use strict';
+
+/* ------------------------------------------------------------------ *
+ * 1. マスタデータ
+ * ------------------------------------------------------------------ */
+
+/* 用途地域。far/bcrは行政GISが値を返さなかったときのフォールバック（目安値）。 */
+const ZONES = [
+  { id:'shitei_nashi', name:'指定なし',             far:200, bcr:60 },
+  { id:'dai1_teiso',   name:'第一種低層住居専用地域', far:100, bcr:50 },
+  { id:'dai2_teiso',   name:'第二種低層住居専用地域', far:150, bcr:60 },
+  { id:'denen',        name:'田園住居地域',          far:100, bcr:50 },
+  { id:'dai1_chuko',   name:'第一種中高層住居専用地域', far:200, bcr:60 },
+  { id:'dai2_chuko',   name:'第二種中高層住居専用地域', far:200, bcr:60 },
+  { id:'dai1_jukyo',   name:'第一種住居地域',        far:200, bcr:60 },
+  { id:'dai2_jukyo',   name:'第二種住居地域',        far:300, bcr:60 },
+  { id:'jun_jukyo',    name:'準住居地域',            far:300, bcr:60 },
+  { id:'kinrin_shogyo',name:'近隣商業地域',          far:300, bcr:80 },
+  { id:'shogyo',       name:'商業地域',              far:400, bcr:80 },
+  { id:'jun_kogyo',    name:'準工業地域',            far:300, bcr:60 },
+  { id:'kogyo',        name:'工業地域',              far:200, bcr:60 },
+  { id:'kogyo_senyo',  name:'工業専用地域',          far:200, bcr:60 },
+];
+const ZONE_BY_ID = new Map(ZONES.map(z => [z.id, z]));
+
+/* reinfolibの用途地域コード（XKT002 youto_id）→ ZONES.id */
+const YOUTO_ID_TO_ZONE = {
+  1:'dai1_teiso', 2:'dai2_teiso', 3:'dai1_chuko', 4:'dai2_chuko',
+  5:'dai1_jukyo', 6:'dai2_jukyo', 7:'jun_jukyo', 8:'kinrin_shogyo',
+  9:'shogyo', 10:'jun_kogyo', 11:'kogyo', 12:'kogyo_senyo', 13:'denen',
+};
+
+/* 用途地域名（表記ゆれあり）→ ZONES.id */
+function zoneIdFromName(name) {
+  if (!name) return null;
+  const s = String(name).replace(/\s/g, '');
+  const table = [
+    ['第一種低層住居専用','dai1_teiso'], ['第1種低層住居専用','dai1_teiso'],
+    ['第二種低層住居専用','dai2_teiso'], ['第2種低層住居専用','dai2_teiso'],
+    ['田園住居','denen'],
+    ['第一種中高層住居専用','dai1_chuko'], ['第1種中高層住居専用','dai1_chuko'],
+    ['第二種中高層住居専用','dai2_chuko'], ['第2種中高層住居専用','dai2_chuko'],
+    ['第一種住居','dai1_jukyo'], ['第1種住居','dai1_jukyo'],
+    ['第二種住居','dai2_jukyo'], ['第2種住居','dai2_jukyo'],
+    ['準住居','jun_jukyo'], ['近隣商業','kinrin_shogyo'],
+    ['準工業','jun_kogyo'], ['工業専用','kogyo_senyo'],
+    ['商業','shogyo'], ['工業','kogyo'],
+  ];
+  for (const [key, id] of table) if (s.includes(key)) return id;
+  return null;
+}
+
+/* 日影規制。値（機械可読）とラベル（人間可読）の両方をGeoJSONに載せる。 */
+const SHADOW_OPTIONS = [
+  { id:'none',        label:'規制なし' },
+  { id:'h1.5_3_2',    label:'測定面1.5m／3時間・2時間' },
+  { id:'h1.5_4_2.5',  label:'測定面1.5m／4時間・2.5時間' },
+  { id:'h1.5_5_3',    label:'測定面1.5m／5時間・3時間' },
+  { id:'h4_3_2',      label:'測定面4m／3時間・2時間' },
+  { id:'h4_4_2.5',    label:'測定面4m／4時間・2.5時間' },
+  { id:'h4_5_3',      label:'測定面4m／5時間・3時間' },
+  { id:'h6.5_4_2.5',  label:'測定面6.5m／4時間・2.5時間' },
+  { id:'h6.5_5_3',    label:'測定面6.5m／5時間・3時間' },
+  { id:'unknown',     label:'未確認' },
+];
+const SHADOW_LABEL = new Map(SHADOW_OPTIONS.map(o => [o.id, o.label]));
+
+/* 新宿区内8エリアのローカルベンチマーク（参考値）。
+ * 賃料・ADRなど市場条件はSiteInfoの責務ではないためHBU-ANALYZER側に置く。
+ * 両者は area_name という文字列1つで結ばれる。 */
+const SHINJUKU_AREAS = [
+  { name:'西新宿',               keys:['西新宿'],                        zone:'shogyo',        road:20, price:480 },
+  { name:'新宿三丁目・歌舞伎町周辺', keys:['新宿三丁目','新宿３丁目','歌舞伎町'], zone:'shogyo',        road:20, price:700 },
+  { name:'高田馬場',             keys:['高田馬場'],                      zone:'shogyo',        road:15, price:330 },
+  { name:'大久保・百人町',        keys:['大久保','百人町'],                zone:'shogyo',        road:12, price:300 },
+  { name:'四谷',                 keys:['四谷','四ツ谷'],                  zone:'shogyo',        road:15, price:400 },
+  { name:'神楽坂',               keys:['神楽坂'],                        zone:'kinrin_shogyo', road:8,  price:350 },
+  { name:'市谷',                 keys:['市谷','市ヶ谷'],                  zone:'shogyo',        road:15, price:380 },
+  { name:'落合・中井',           keys:['落合','中井'],                    zone:'dai1_jukyo',    road:6,  price:220 },
+];
+
+/* 行政GIS（不動産情報ライブラリ / reinfolib）で取得するレイヤー */
+const GIS_ZOOM = 14;
+const REINFOLIB_BASE = 'https://www.reinfolib.mlit.go.jp/ex-api/external/';
+const LAYERS = {
+  youto:    { id:'XKT002', label:'用途地域' },
+  chiku:    { id:'XKT023', label:'地区計画' },
+  bouka:    { id:'XKT014', label:'防火・準防火地域' },
+  kodo:     { id:'XKT024', label:'高度地区' },
+  chika:    { id:'XPT002', label:'地価公示' },
+};
+const CHIKA_YEARS = [2025, 2024, 2023, 2022];
+
+const TSUBO_M2 = 3.305785;          /* 1坪 = 3.305785 m² */
+const SOURCE_VERSION = '0.1';
+
+/* ------------------------------------------------------------------ *
+ * 2. 幾何ユーティリティ
+ * ------------------------------------------------------------------ */
+
+/* 敷地面積[m²]。平均緯度を基準にした局所平面近似＋靴ひも公式。
+ * 測地線に基づく厳密な面積ではないが、敷地スケールでは十分な精度。
+ * HBU-ANALYZER・BVCEにも同一の式があり、同じGeoJSONで面積が食い違わない。 */
+function polygonAreaM2(latlngs) {
+  if (!latlngs || latlngs.length < 3) return 0;
+  const R = 6378137;
+  const rad = Math.PI / 180;
+  const lat0 = latlngs.reduce((s, p) => s + p.lat, 0) / latlngs.length;
+  const cos0 = Math.cos(lat0 * rad);
+  const xy = latlngs.map(p => ({ x: R * p.lng * rad * cos0, y: R * p.lat * rad }));
+  let s = 0;
+  for (let i = 0; i < xy.length; i++) {
+    const a = xy[i], b = xy[(i + 1) % xy.length];
+    s += a.x * b.y - b.x * a.y;
+  }
+  return Math.abs(s) / 2;
+}
+
+function centroidOf(latlngs) {
+  const lat = latlngs.reduce((s, p) => s + p.lat, 0) / latlngs.length;
+  const lng = latlngs.reduce((s, p) => s + p.lng, 0) / latlngs.length;
+  return { lat, lng };
+}
+
+/* 点内多角形判定（レイキャスティング法）。リングは [lng, lat] の配列。 */
+function ringContains(ring, lng, lat) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1];
+    const xj = ring[j][0], yj = ring[j][1];
+    const hit = (yi > lat) !== (yj > lat) &&
+                lng < ((xj - xi) * (lat - yi)) / ((yj - yi) || 1e-12) + xi;
+    if (hit) inside = !inside;
+  }
+  return inside;
+}
+
+/* 穴あきポリゴンに対応（外周に入り、かつどの穴にも入っていない） */
+function polygonContains(coords, lng, lat) {
+  if (!coords || !coords.length) return false;
+  if (!ringContains(coords[0], lng, lat)) return false;
+  for (let i = 1; i < coords.length; i++) {
+    if (ringContains(coords[i], lng, lat)) return false;
+  }
+  return true;
+}
+
+function geometryContains(geom, lng, lat) {
+  if (!geom) return false;
+  if (geom.type === 'Polygon') return polygonContains(geom.coordinates, lng, lat);
+  if (geom.type === 'MultiPolygon') {
+    return geom.coordinates.some(poly => polygonContains(poly, lng, lat));
+  }
+  return false;
+}
+
+/* 対象地点を含むフィーチャーを1件だけ返す */
+function featureAt(geojson, lng, lat) {
+  const feats = (geojson && geojson.features) || [];
+  for (const f of feats) if (geometryContains(f.geometry, lng, lat)) return f;
+  return null;
+}
+
+/* 緯度経度 → XYZタイル座標 */
+function tileXY(lat, lng, z) {
+  const n = Math.pow(2, z);
+  const latRad = lat * Math.PI / 180;
+  const x = Math.floor((lng + 180) / 360 * n);
+  const y = Math.floor((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n);
+  return { x, y, z };
+}
+
+/* ------------------------------------------------------------------ *
+ * 3. 汎用ヘルパ
+ * ------------------------------------------------------------------ */
+const $ = id => document.getElementById(id);
+const fmt = (v, d = 0) => (v == null || !isFinite(v)) ? '' :
+  Number(v).toLocaleString('ja-JP', { maximumFractionDigits: d, minimumFractionDigits: 0 });
+
+function numOrNull(el) {
+  const v = parseFloat(el.value);
+  return isFinite(v) ? v : null;
+}
+
+/* プロパティ名の候補から最初に見つかった値を返す（APIの表記ゆれ対策） */
+function pick(props, candidates) {
+  if (!props) return null;
+  for (const key of candidates) {
+    if (props[key] != null && props[key] !== '') return props[key];
+  }
+  /* 候補に無ければ、キー名に候補文字列を含むものを探す */
+  const keys = Object.keys(props);
+  for (const cand of candidates) {
+    const hit = keys.find(k => k.toLowerCase().includes(cand.toLowerCase()));
+    if (hit && props[hit] != null && props[hit] !== '') return props[hit];
+  }
+  return null;
+}
+
+function toNumber(v) {
+  if (v == null) return null;
+  if (typeof v === 'number') return isFinite(v) ? v : null;
+  const m = String(v).replace(/,/g, '').match(/-?\d+(\.\d+)?/);
+  return m ? parseFloat(m[0]) : null;
+}
+
+/* ------------------------------------------------------------------ *
+ * 4. 状態
+ * ------------------------------------------------------------------ */
+const state = {
+  polygon: null,      /* 確定した敷地: [{lat,lng}, ...] */
+  point: null,        /* 敷地未確定時の代表点 */
+  address: '',
+  areaName: '',
+  gisSource: '',
+  gisAt: null,        /* 行政GISを取得した地点 */
+};
+
+let mode = 'idle';    /* 'idle' | 'draw' | 'info' */
+let drafting = [];    /* 描画中の頂点 */
+
+/* ------------------------------------------------------------------ *
+ * 5. 地図（Leaflet + 国土地理院タイル）
+ * ------------------------------------------------------------------ */
+const GSI_ATTR = '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">国土地理院</a>';
+
+/* Leafletが読めない環境（オフライン等）でも、地図以外は動かし続ける。 */
+const hasMap = (typeof L !== 'undefined');
+let map = null, baseStd = null, basePhoto = null;
+let sitePoly = null, draftLine = null, draftDots = null, searchMarker = null;
+let photoOn = false;
+
+if (hasMap) {
+  baseStd = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png',
+    { maxZoom: 18, attribution: GSI_ATTR });
+  basePhoto = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg',
+    { maxZoom: 18, attribution: GSI_ATTR });
+
+  map = L.map('map', { center: [35.6938, 139.7036], zoom: 16, layers: [baseStd], zoomControl: true });
+  sitePoly = L.polygon([], { color: '#c1440e', weight: 3, fillOpacity: 0.16 }).addTo(map);
+  draftLine = L.polyline([], { color: '#1d5a7a', weight: 2, dashArray: '5,4' }).addTo(map);
+  draftDots = L.layerGroup().addTo(map);
+
+  map.on('click', ev => {
+    const p = { lat: ev.latlng.lat, lng: ev.latlng.lng };
+    if (mode === 'draw') { drafting.push(p); redrawDraft(); }
+    else if (mode === 'info') { showPointInfo(p); }
+  });
+
+  $('btn-base').addEventListener('click', () => {
+    photoOn = !photoOn;
+    map.removeLayer(photoOn ? baseStd : basePhoto);
+    map.addLayer(photoOn ? basePhoto : baseStd);
+    $('btn-base').textContent = photoOn ? '標準地図' : '航空写真';
+  });
+} else {
+  $('map').innerHTML =
+    '<div style="padding:24px;line-height:1.7;color:inherit">' +
+    '<b>地図ライブラリ（Leaflet）を読み込めませんでした。</b><br>' +
+    'ネットワークに接続できない環境では地図が使えません。' +
+    'GeoJSONの読み込み・STEP2の手入力・書き出しはそのまま使えます。</div>';
+  $('btn-base').disabled = true;
+  $('btn-draw').disabled = true;
+  $('btn-info').disabled = true;
+}
+
+function showMapMsg(text) {
+  const el = $('mapmsg');
+  if (!text) { el.classList.remove('show'); return; }
+  el.textContent = text;
+  el.classList.add('show');
+}
+
+function setMode(next) {
+  mode = next;
+  $('btn-draw').classList.toggle('on', mode === 'draw');
+  $('btn-info').classList.toggle('on', mode === 'info');
+  if (mode === 'draw') showMapMsg('地図をクリックして頂点を追加（3点以上で「確定」）');
+  else if (mode === 'info') showMapMsg('地図をクリックした地点の都市計画情報を表示します');
+  else showMapMsg('');
+}
+
+function redrawDraft() {
+  $('btn-finish').disabled = drafting.length < 3;
+  if (!hasMap) return;
+  draftLine.setLatLngs(drafting.map(p => [p.lat, p.lng]));
+  draftDots.clearLayers();
+  drafting.forEach((p, i) => {
+    L.circleMarker([p.lat, p.lng], {
+      radius: 4, color: '#1d5a7a', fillColor: '#fff', fillOpacity: 1, weight: 2,
+    }).bindTooltip(String(i + 1), { permanent: false }).addTo(draftDots);
+  });
+}
+
+$('btn-draw').addEventListener('click', () => setMode(mode === 'draw' ? 'idle' : 'draw'));
+$('btn-info').addEventListener('click', () => setMode(mode === 'info' ? 'idle' : 'info'));
+
+$('btn-finish').addEventListener('click', () => {
+  if (drafting.length < 3) return;
+  setPolygon(drafting.slice());
+  drafting = [];
+  redrawDraft();
+  setMode('idle');
+});
+
+$('btn-clear').addEventListener('click', () => {
+  drafting = [];
+  redrawDraft();
+  state.polygon = null;
+  if (hasMap) sitePoly.setLatLngs([]);
+  setMode('idle');
+  updateArea();
+  renderSummary();
+});
+
+function setPolygon(latlngs) {
+  state.polygon = latlngs;
+  state.point = centroidOf(latlngs);
+  if (hasMap) {
+    sitePoly.setLatLngs(latlngs.map(p => [p.lat, p.lng]));
+    map.fitBounds(sitePoly.getBounds(), { padding: [40, 40], maxZoom: 18 });
+  }
+  updateArea();
+  renderSummary();
+}
+
+/* 代表点（敷地があれば重心、無ければ検索地点） */
+function refPoint() {
+  if (state.polygon) return centroidOf(state.polygon);
+  return state.point;
+}
+
+function updateArea() {
+  const auto = state.polygon ? polygonAreaM2(state.polygon) : null;
+  $('area-auto').value = auto == null ? '' :
+    `${fmt(auto, 1)} m²（${fmt(auto / TSUBO_M2, 1)} 坪）`;
+  $('area-auto').placeholder = auto == null ? '敷地未確定' : '';
+}
+
+function effectiveArea() {
+  const manual = numOrNull($('area-manual'));
+  if (manual != null && manual > 0) return { m2: manual, manual: true };
+  if (state.polygon) return { m2: polygonAreaM2(state.polygon), manual: false };
+  return { m2: null, manual: false };
+}
+
+/* ------------------------------------------------------------------ *
+ * 6. STEP1: 住所検索 / GeoJSON読み込み
+ * ------------------------------------------------------------------ */
+const GEOCODE_URL = 'https://msearch.gsi.go.jp/address-search/AddressSearch?q=';
+
+async function search() {
+  const q = $('q').value.trim();
+  if (!q) return;
+  const hits = $('hits');
+  hits.innerHTML = '<li>検索中…</li>';
+  hits.classList.add('show');
+  try {
+    const res = await fetch(GEOCODE_URL + encodeURIComponent(q));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const list = await res.json();
+    if (!Array.isArray(list) || !list.length) {
+      hits.innerHTML = '<li>該当なし。町名までで試してください。</li>';
+      return;
+    }
+    hits.innerHTML = '';
+    list.slice(0, 12).forEach(item => {
+      const title = (item.properties && item.properties.title) || '(名称なし)';
+      const c = item.geometry && item.geometry.coordinates;
+      if (!c) return;
+      const li = document.createElement('li');
+      li.textContent = title;
+      li.addEventListener('click', () => {
+        hits.classList.remove('show');
+        pickAddress(title, { lat: c[1], lng: c[0] });
+      });
+      hits.appendChild(li);
+    });
+  } catch (e) {
+    hits.innerHTML = `<li>検索できませんでした（${e.message}）</li>`;
+  }
+}
+
+function pickAddress(title, latlng) {
+  state.address = title;
+  state.point = latlng;
+  if (hasMap) {
+    map.setView([latlng.lat, latlng.lng], 18);
+    if (searchMarker) map.removeLayer(searchMarker);
+    searchMarker = L.marker([latlng.lat, latlng.lng]).addTo(map).bindPopup(title).openPopup();
+  }
+  applyLocalBenchmark(title);
+  renderSummary();
+}
+
+/* 住所文字列から新宿区内エリアを判定し、STEP2の目安値を反映する */
+function applyLocalBenchmark(address) {
+  state.areaName = '';
+  if (!address || !address.includes('新宿区')) return;
+  const area = SHINJUKU_AREAS.find(a => a.keys.some(k => address.includes(k)));
+  if (!area) return;
+  state.areaName = area.name;
+  const zone = ZONE_BY_ID.get(area.zone);
+  $('zone').value = area.zone;
+  if (zone) { $('far').value = zone.far; $('bcr').value = zone.bcr; }
+  $('road-width').value = area.road;
+  $('land-price').value = area.price;
+  note('gis-status', `「${area.name}」のローカルベンチマーク（参考値）を反映しました。行政GISで上書きできます。`, 'ok');
+}
+
+/* GeoJSON読み込み（Polygon / Feature / FeatureCollection） */
+$('btn-import').addEventListener('click', () => $('file').click());
+$('file').addEventListener('change', async ev => {
+  const file = ev.target.files && ev.target.files[0];
+  if (!file) return;
+  try {
+    const latlngs = parseGeoJsonPolygon(await file.text());
+    setPolygon(latlngs);
+    note('draw-hint', `${file.name} から ${latlngs.length} 頂点を読み込みました。`, 'ok');
+  } catch (e) {
+    note('draw-hint', '読み込めませんでした: ' + e.message, 'err');
+  }
+  ev.target.value = '';
+});
+
+function parseGeoJsonPolygon(text) {
+  let data;
+  try { data = JSON.parse(text); }
+  catch (e) { throw new Error('JSONの形式が正しくありません: ' + e.message); }
+
+  let geom = null;
+  if (data.type === 'FeatureCollection') {
+    const f = (data.features || []).find(x => x.geometry &&
+      (x.geometry.type === 'Polygon' || x.geometry.type === 'MultiPolygon'));
+    if (!f) throw new Error('FeatureCollectionにPolygonがありません');
+    geom = f.geometry;
+    if (f.properties) applyImportedProperties(f.properties);
+  } else if (data.type === 'Feature') {
+    geom = data.geometry;
+    if (data.properties) applyImportedProperties(data.properties);
+  } else if (data.type === 'Polygon' || data.type === 'MultiPolygon') {
+    geom = data;
+  }
+  if (!geom) throw new Error('Polygon / Feature / FeatureCollection のいずれかにしてください');
+
+  const ring = geom.type === 'Polygon' ? geom.coordinates[0] : geom.coordinates[0][0];
+  if (!Array.isArray(ring) || ring.length < 3) throw new Error('頂点が3点未満です');
+
+  const latlngs = ring.map((c, i) => {
+    if (!Array.isArray(c) || c.length < 2) throw new Error(`頂点[${i}]が [経度, 緯度] の形ではありません`);
+    const [lng, lat] = c;
+    /* GeoJSONの座標順は [経度, 緯度]。範囲外なら中断する。 */
+    if (!isFinite(lat) || !isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+      throw new Error(`頂点[${i}]がWGS84の範囲外です（[経度, 緯度]の順か確認してください）: ${JSON.stringify(c)}`);
+    }
+    return { lat, lng };
+  });
+  /* 閉じたリングの終点は落とす */
+  const a = latlngs[0], b = latlngs[latlngs.length - 1];
+  if (latlngs.length > 3 && a.lat === b.lat && a.lng === b.lng) latlngs.pop();
+  return latlngs;
+}
+
+/* 書き出したGeoJSONを読み戻したときは、入っている属性だけを反映する */
+function applyImportedProperties(p) {
+  const setIfPresent = (el, v) => { if (v != null && v !== '') el.value = v; };
+  setIfPresent($('site-name'), p.name);
+  setIfPresent($('far'), p.far_percent);
+  setIfPresent($('bcr'), p.bcr_percent);
+  setIfPresent($('district-plan'), p.district_plan);
+  setIfPresent($('fire-zone'), p.fire_zone);
+  setIfPresent($('height-zone'), p.height_zone);
+  setIfPresent($('land-price'), p.land_price_man_per_tsubo);
+  setIfPresent($('road-width'), p.road_width_m);
+  setIfPresent($('walk-min'), p.walk_min);
+  if (p.zone_id && ZONE_BY_ID.has(p.zone_id)) $('zone').value = p.zone_id;
+  else if (p.zone) { const id = zoneIdFromName(p.zone); if (id) $('zone').value = id; }
+  if (p.shadow_regulation && SHADOW_LABEL.has(p.shadow_regulation)) $('shadow').value = p.shadow_regulation;
+  if (p.area_is_manual && p.area_m2 != null) $('area-manual').value = p.area_m2;
+  if (p.address) state.address = p.address;
+  if (p.area_name) state.areaName = p.area_name;
+}
+
+$('btn-search').addEventListener('click', search);
+$('q').addEventListener('keydown', e => { if (e.key === 'Enter') search(); });
+
+/* ------------------------------------------------------------------ *
+ * 7. STEP2: 行政GIS（不動産情報ライブラリ / reinfolib）
+ *
+ * CORS制限のためブラウザから直接は取得できない。Electronのメインプロセス
+ * 経由（window.gisAPI.fetch）で取得する。未定義でも例外は握りつぶし、
+ * 機能を無効化した状態で動き続ける。
+ * ------------------------------------------------------------------ */
+let apiKeyFromEnv = '';
+
+(async function loadEnvKey() {
+  try {
+    if (window.envAPI && typeof window.envAPI.get === 'function') {
+      const v = await window.envAPI.get('REINFOLIB_API_KEY');
+      if (typeof v === 'string' && v) {
+        apiKeyFromEnv = v;
+        $('apikey').placeholder = '環境変数から取得済み';
+      }
+    }
+  } catch (e) { /* ホストが無い場合は無視する */ }
+  showHostNote();
+})();
+
+function hasGisHost() {
+  return !!(window.gisAPI && typeof window.gisAPI.fetch === 'function');
+}
+
+function showHostNote() {
+  const el = $('host-note');
+  if (hasGisHost()) { el.style.display = 'none'; return; }
+  el.className = 'note warn';
+  el.style.display = 'block';
+  el.innerHTML = '<b>行政GISは利用できません。</b>' +
+    'reinfolibはCORS制限のためブラウザから直接取得できず、Electronホストの ' +
+    '<code>window.gisAPI.fetch</code> が必要です。地図・描画・GeoJSON入出力・PLATEAUは' +
+    'そのまま使えます。用途地域などはSTEP2に手入力すればGeoJSONは作れます。';
+}
+
+function apiKey() {
+  return $('apikey').value.trim() || apiKeyFromEnv;
+}
+
+function note(id, text, kind) {
+  const el = $(id);
+  el.className = 'hint' + (kind ? ' ' + kind : '');
+  el.textContent = text;
+}
+
+async function fetchLayer(layerId, tile, extraQuery) {
+  const url = `${REINFOLIB_BASE}${layerId}?response_format=geojson` +
+              `&z=${tile.z}&x=${tile.x}&y=${tile.y}` + (extraQuery || '');
+  const raw = await window.gisAPI.fetch(url, apiKey());
+  return normalizeGisResponse(raw);
+}
+
+/* ホスト実装の差異を吸収する（文字列／{body}／{data}／GeoJSONそのもの） */
+function normalizeGisResponse(raw) {
+  if (raw == null) throw new Error('応答が空です');
+  let data = raw;
+  if (typeof data === 'string') data = JSON.parse(data);
+  if (data && typeof data === 'object' && !data.type) {
+    if (data.ok === false || data.error) {
+      throw new Error(String(data.error || `HTTP ${data.status || '?'}`));
+    }
+    const body = data.body != null ? data.body : (data.data != null ? data.data : data.text);
+    if (body != null) data = (typeof body === 'string') ? JSON.parse(body) : body;
+  }
+  if (!data || typeof data !== 'object') throw new Error('GeoJSONとして解釈できません');
+  return data;
+}
+
+/* 地価公示: 2025年から遡って取得し、タイル内で最も近い地点を採る */
+async function fetchLandPrice(tile, lat, lng) {
+  for (const year of CHIKA_YEARS) {
+    let gj;
+    try { gj = await fetchLayer(LAYERS.chika.id, tile, `&year=${year}&priceClassification=0`); }
+    catch (e) { continue; }
+    const feats = (gj.features || []).filter(f => f.geometry && f.geometry.type === 'Point');
+    if (!feats.length) continue;
+    let best = null, bestD = Infinity;
+    for (const f of feats) {
+      const [flng, flat] = f.geometry.coordinates;
+      const d = (flng - lng) ** 2 + (flat - lat) ** 2;
+      if (d < bestD) { bestD = d; best = f; }
+    }
+    if (!best) continue;
+    const yenPerM2 = toNumber(pick(best.properties, [
+      'u_current_years_price_ja', 'current_years_price', 'land_price', 'price',
+    ]));
+    if (yenPerM2 == null) continue;
+    return {
+      year,
+      manPerTsubo: Math.round(yenPerM2 * TSUBO_M2 / 10000),
+      label: pick(best.properties, ['standard_lot_number_ja', 'standard_lot_number', 'address']) || '',
+    };
+  }
+  return null;
+}
+
+/* 1地点の行政情報をまとめて取得する（STEP2ボタンと地点情報モードで共用） */
+async function fetchAdminInfo(lat, lng) {
+  if (!hasGisHost()) throw new Error('window.gisAPI がありません（Electronで起動してください）');
+  if (!apiKey()) throw new Error('reinfolib APIキーが設定されていません');
+  const tile = tileXY(lat, lng, GIS_ZOOM);
+  const out = { errors: [], tile };
+
+  const jobs = [
+    ['youto', LAYERS.youto.id, ''],
+    ['chiku', LAYERS.chiku.id, ''],
+    ['bouka', LAYERS.bouka.id, ''],
+    ['kodo',  LAYERS.kodo.id,  ''],
+  ];
+  const results = await Promise.all(jobs.map(async ([key, id, extra]) => {
+    try { return [key, featureAt(await fetchLayer(id, tile, extra), lng, lat), null]; }
+    catch (e) { return [key, null, e.message || String(e)]; }
+  }));
+
+  let failed = 0;
+  out.failed = {};
+  for (const [key, feat, err] of results) {
+    if (err) { failed++; out.failed[key] = true; out.errors.push(`${LAYERS[key].label}: ${err}`); continue; }
+    out[key] = feat ? feat.properties || {} : null;
+  }
+  out.allFailed = failed === results.length;
+
+  try { out.chika = await fetchLandPrice(tile, lat, lng); }
+  catch (e) { out.errors.push(`${LAYERS.chika.label}: ${e.message || e}`); }
+  return out;
+}
+
+/* 取得結果 → STEP2のフォーム */
+function applyAdminInfo(info) {
+  const notes = [];
+
+  if (info.youto) {
+    const p = info.youto;
+    const zoneId = YOUTO_ID_TO_ZONE[toNumber(pick(p, ['youto_id', 'use_district_id']))] ||
+                   zoneIdFromName(pick(p, ['youto_chiiki', 'use_district', 'youto', 'name']));
+    if (zoneId) $('zone').value = zoneId;
+    const far = toNumber(pick(p, ['yoseki_rate', 'floor_area_ratio', 'yoseki']));
+    const bcr = toNumber(pick(p, ['kenpei_rate', 'building_coverage_ratio', 'kenpei']));
+    const fallback = ZONE_BY_ID.get(zoneId || $('zone').value);
+    if (far != null) $('far').value = far;
+    else if (fallback) { $('far').value = fallback.far; notes.push('容積率は行政データに無いため用途地域の目安値です'); }
+    if (bcr != null) $('bcr').value = bcr;
+    else if (fallback) { $('bcr').value = fallback.bcr; notes.push('建ぺい率は行政データに無いため用途地域の目安値です'); }
+  } else if (!info.failed.youto) {
+    notes.push('用途地域: 該当なし');
+  }
+
+  if (info.chiku) {
+    $('district-plan').value = pick(info.chiku, ['plan_name', 'chiku_name', 'district_plan', 'name']) || '指定あり';
+  } else if (!info.failed.chiku) {
+    $('district-plan').value = $('district-plan').value || '指定なし';
+  }
+
+  if (info.bouka) {
+    const id = toNumber(pick(info.bouka, ['bouka_id', 'fire_prevention_id']));
+    const name = pick(info.bouka, ['bouka_chiiki', 'fire_prevention', 'name']);
+    $('fire-zone').value = name || (id === 1 ? '防火地域' : id === 2 ? '準防火地域' : '指定あり');
+  } else if (!info.failed.bouka) {
+    $('fire-zone').value = $('fire-zone').value || '指定なし';
+  }
+
+  if (info.kodo) {
+    $('height-zone').value = pick(info.kodo, ['kodo_name', 'height_district', 'kodo', 'name']) || '指定あり';
+  } else if (!info.failed.kodo) {
+    $('height-zone').value = $('height-zone').value || '指定なし';
+  }
+
+  if (info.chika) {
+    $('land-price').value = info.chika.manPerTsubo;
+    notes.push(`地価は${info.chika.year}年の地価公示（最寄地点）から坪単価に換算`);
+  }
+  return notes;
+}
+
+$('btn-gis').addEventListener('click', async () => {
+  const p = refPoint();
+  if (!p) { note('gis-status', '先に敷地を描くか、住所を検索してください。', 'warn'); return; }
+  $('btn-gis').disabled = true;
+  note('gis-status', '行政GISから取得中…');
+  try {
+    const info = await fetchAdminInfo(p.lat, p.lng);
+    if (info.allFailed) {
+      /* 4レイヤーすべてが失敗＝「データなし」ではない。誤認させないよう明示する。 */
+      note('gis-status', '行政GISを取得できませんでした: ' + info.errors[0], 'err');
+    } else {
+      const notes = applyAdminInfo(info);
+      state.gisSource = '国土交通省 不動産情報ライブラリ(reinfolib)';
+      state.gisAt = p;
+      const msg = ['行政GISを反映しました。'].concat(notes, info.errors).join(' / ');
+      note('gis-status', msg, info.errors.length ? 'warn' : 'ok');
+    }
+  } catch (e) {
+    note('gis-status', '取得できませんでした: ' + (e.message || e), 'err');
+  } finally {
+    $('btn-gis').disabled = false;
+    renderSummary();
+    renderGisLinks();
+  }
+});
+
+/* 🔍 地点情報モード（区の「みんなのGIS」相当） */
+async function showPointInfo(p) {
+  if (!hasMap) return;
+  const popup = L.popup({ maxWidth: 320 })
+    .setLatLng([p.lat, p.lng])
+    .setContent('都市計画情報を取得中…')
+    .openOn(map);
+  try {
+    const info = await fetchAdminInfo(p.lat, p.lng);
+    if (info.allFailed) { popup.setContent('取得できませんでした: ' + info.errors[0]); return; }
+    const zoneName = (() => {
+      const id = YOUTO_ID_TO_ZONE[toNumber(pick(info.youto || {}, ['youto_id']))] ||
+                 zoneIdFromName(pick(info.youto || {}, ['youto_chiiki', 'use_district', 'name']));
+      const z = ZONE_BY_ID.get(id);
+      return z ? z.name : '—';
+    })();
+    const rows = [
+      ['用途地域', info.youto ? zoneName : '—'],
+      ['容積率 / 建ぺい率', info.youto
+        ? `${toNumber(pick(info.youto, ['yoseki_rate'])) ?? '—'}% / ${toNumber(pick(info.youto, ['kenpei_rate'])) ?? '—'}%`
+        : '—'],
+      ['地区計画', info.failed.chiku ? '取得失敗' : info.chiku ? (pick(info.chiku, ['plan_name', 'chiku_name', 'name']) || '指定あり') : '指定なし'],
+      ['防火・準防火', info.failed.bouka ? '取得失敗' : info.bouka ? (pick(info.bouka, ['bouka_chiiki', 'name']) || '指定あり') : '指定なし'],
+      ['高度地区', info.failed.kodo ? '取得失敗' : info.kodo ? (pick(info.kodo, ['kodo_name', 'name']) || '指定あり') : '指定なし'],
+      ['地価公示', info.chika ? `${fmt(info.chika.manPerTsubo)} 万円/坪（${info.chika.year}年）` : '—'],
+      ['緯度経度', `${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}`],
+    ];
+    popup.setContent(
+      '<div style="font-size:12px;line-height:1.6">' +
+      rows.map(([k, v]) => `<div><b>${k}</b>: ${v}</div>`).join('') +
+      '<div style="margin-top:6px;color:#777">参考値です。正式確認は自治体窓口で。</div></div>'
+    );
+  } catch (e) {
+    popup.setContent('取得できませんでした: ' + (e.message || e));
+  }
+}
+
+function renderGisLinks() {
+  const p = refPoint();
+  if (!p) { $('gis-links').innerHTML = ''; return; }
+  const ll = `${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}`;
+  $('gis-links').innerHTML =
+    `この地点: <code>${ll}</code>　` +
+    `<a href="https://www.reinfolib.mlit.go.jp/" target="_blank" rel="noopener">不動産情報ライブラリ</a>／` +
+    `<a href="https://maps.gsi.go.jp/#17/${p.lat.toFixed(6)}/${p.lng.toFixed(6)}/" target="_blank" rel="noopener">地理院地図</a>` +
+    ` で道路幅員・日影規制を確認してください。`;
+}
+
+/* ------------------------------------------------------------------ *
+ * 8. STEP3: 敷地情報GeoJSON
+ *
+ * 本エンジンの成果物であり、SIMワールド各エンジンの共通入力フォーマット。
+ * 実質的にエンジン間の契約にあたる。
+ *   - 座標はWGS84（EPSG:4326）、順序は [経度, 緯度]
+ *   - 属性は素のスカラー値。単位を名前に含める（area_m2 / road_width_m …）
+ *   - 日影規制は値（機械可読）とラベル（人間可読）を併記する
+ *   - source / gis_source / generated_at で数値の由来を辿れるようにする
+ * ------------------------------------------------------------------ */
+function buildProperties() {
+  const area = effectiveArea();
+  const zoneId = $('zone').value;
+  const zone = ZONE_BY_ID.get(zoneId);
+  const shadow = $('shadow').value;
+  const blank = v => (v == null || v === '') ? null : v;
+
+  return {
+    name: blank($('site-name').value.trim()),
+    address: blank(state.address),
+    area_name: blank(state.areaName),
+    area_m2: area.m2 == null ? null : Math.round(area.m2 * 100) / 100,
+    area_tsubo: area.m2 == null ? null : Math.round(area.m2 / TSUBO_M2 * 10) / 10,
+    area_is_manual: area.manual,
+    zone: zone ? zone.name : null,
+    zone_id: zone ? zone.id : null,
+    far_percent: numOrNull($('far')),
+    bcr_percent: numOrNull($('bcr')),
+    road_width_m: numOrNull($('road-width')),
+    walk_min: numOrNull($('walk-min')),
+    land_price_man_per_tsubo: numOrNull($('land-price')),
+    district_plan: blank($('district-plan').value.trim()),
+    fire_zone: blank($('fire-zone').value.trim()),
+    height_zone: blank($('height-zone').value.trim()),
+    shadow_regulation: shadow,
+    shadow_regulation_label: SHADOW_LABEL.get(shadow) || null,
+    source: 'SiteInfo',
+    source_version: SOURCE_VERSION,
+    gis_source: blank(state.gisSource),
+    generated_at: new Date().toISOString(),
+  };
+}
+
+function buildGeoJson() {
+  const props = buildProperties();
+  let geometry = null;
+  if (state.polygon) {
+    const ring = state.polygon.map(p => [
+      Math.round(p.lng * 1e7) / 1e7, Math.round(p.lat * 1e7) / 1e7,
+    ]);
+    ring.push(ring[0].slice());          /* GeoJSONのリングは閉じる */
+    geometry = { type: 'Polygon', coordinates: [ring] };
+  } else if (state.point) {
+    geometry = { type: 'Point', coordinates: [state.point.lng, state.point.lat] };
+  }
+  return {
+    type: 'FeatureCollection',
+    features: [{ type: 'Feature', properties: props, geometry }],
+  };
+}
+
+/* 書き出し前の内容確認。入力を変えるたびに再描画する。 */
+const SUMMARY_ROWS = [
+  ['敷地', [
+    ['name', '名称'], ['address', '住所'], ['area_name', 'エリア'],
+    ['area_m2', '敷地面積', 'm²'], ['area_tsubo', '　（坪）', '坪'],
+    ['area_is_manual', '面積は手入力'],
+  ]],
+  ['都市計画', [
+    ['zone', '用途地域'], ['zone_id', '　（ID）'],
+    ['far_percent', '容積率', '%'], ['bcr_percent', '建ぺい率', '%'],
+    ['district_plan', '地区計画'], ['fire_zone', '防火・準防火地域'],
+    ['height_zone', '高度地区'],
+    ['shadow_regulation_label', '日影規制'], ['shadow_regulation', '　（値）'],
+  ]],
+  ['立地・市場', [
+    ['road_width_m', '前面道路幅員', 'm'], ['walk_min', '駅徒歩', '分'],
+    ['land_price_man_per_tsubo', '想定地価', '万円/坪'],
+  ]],
+  ['出所', [
+    ['source', 'source'], ['source_version', 'version'],
+    ['gis_source', '行政GIS'], ['generated_at', '生成時刻'],
+  ]],
+];
+
+function renderSummary() {
+  const p = buildProperties();
+  const rows = [];
+  for (const [group, items] of SUMMARY_ROWS) {
+    rows.push(`<tr class="head"><th colspan="2">${group}</th></tr>`);
+    for (const [key, label, unit] of items) {
+      let v = p[key];
+      let cls = '';
+      if (typeof v === 'boolean') v = v ? 'はい' : 'いいえ';
+      else if (v == null || v === '') { v = '—'; cls = ' class="na"'; }
+      else if (typeof v === 'number') v = fmt(v, 2) + (unit ? ' ' + unit : '');
+      else if (unit) v = v + ' ' + unit;
+      rows.push(`<tr><th>${label}</th><td${cls}>${v}</td></tr>`);
+    }
+  }
+  const geom = state.polygon
+    ? `Polygon（${state.polygon.length}頂点・WGS84）`
+    : (state.point ? 'Point（敷地形状は未確定）' : '—');
+  rows.push('<tr class="head"><th colspan="2">形状</th></tr>');
+  rows.push(`<tr><th>geometry</th><td>${geom}</td></tr>`);
+  $('sumbody').innerHTML = `<table class="sum"><tbody>${rows.join('')}</tbody></table>`;
+}
+
+function fileNameBase() {
+  const name = ($('site-name').value.trim() || state.address || 'site')
+    .replace(/[\\/:*?"<>|\s]+/g, '_');
+  const d = new Date();
+  const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+  return `siteinfo_${name}_${stamp}`;
+}
+
+$('btn-export').addEventListener('click', () => {
+  if (!state.polygon && !state.point) {
+    note('export-status', '敷地または地点が決まっていません。', 'warn');
+    return;
+  }
+  const text = JSON.stringify(buildGeoJson(), null, 2);
+  const blob = new Blob([text], { type: 'application/geo+json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileNameBase() + '.geojson';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  note('export-status', `${a.download} を書き出しました。HBU-ANALYZER・BVCE・MVEに読み込めます。`, 'ok');
+});
+
+$('btn-copy').addEventListener('click', async () => {
+  const text = JSON.stringify(buildGeoJson(), null, 2);
+  try {
+    await navigator.clipboard.writeText(text);
+    note('export-status', 'GeoJSONをクリップボードにコピーしました。', 'ok');
+  } catch (e) {
+    note('export-status', 'コピーできませんでした: ' + (e.message || e), 'err');
+  }
+});
+
+/* ------------------------------------------------------------------ *
+ * 9. PLATEAU 3D表示
+ *
+ * 国土交通省 Project PLATEAU の3D Tiles配信をCesiumJSで埋め込む。
+ * Cesium ionのトークンを使わない構成のため、APIキー・利用登録は不要。
+ * ------------------------------------------------------------------ */
+const CESIUM_VERSION = '1.118';
+const CESIUM_BASE = `https://cesium.com/downloads/cesiumjs/releases/${CESIUM_VERSION}/Build/Cesium/`;
+const REVERSE_GEOCODER = 'https://mreversegeocoder.gsi.go.jp/reverse-geocoder/LonLatToAddress';
+const PLATEAU_CATALOG = 'https://api.plateauview.mlit.go.jp/datacatalog/plateau-datasets';
+const PLATEAU_ORTHO = 'https://gic-plateau.s3.ap-northeast-1.amazonaws.com/2020/ortho/tiles/{z}/{x}/{y}.png';
+
+let cesiumLoading = null;
+let viewer = null;
+
+function loadCesium() {
+  if (window.Cesium) return Promise.resolve();
+  if (cesiumLoading) return cesiumLoading;
+  window.CESIUM_BASE_URL = CESIUM_BASE;
+  cesiumLoading = new Promise((resolve, reject) => {
+    const css = document.createElement('link');
+    css.rel = 'stylesheet';
+    css.href = CESIUM_BASE + 'Widgets/widgets.css';
+    document.head.appendChild(css);
+    const js = document.createElement('script');
+    js.src = CESIUM_BASE + 'Cesium.js';
+    js.onload = () => resolve();
+    js.onerror = () => reject(new Error('CesiumJSを読み込めませんでした'));
+    document.head.appendChild(js);
+  });
+  return cesiumLoading;
+}
+
+/* 緯度経度 → 5桁の市区町村コード */
+async function muniCode(lat, lng) {
+  const res = await fetch(`${REVERSE_GEOCODER}?lat=${lat}&lon=${lng}`);
+  if (!res.ok) throw new Error('リバースジオコーダ HTTP ' + res.status);
+  const data = await res.json();
+  const code = data && data.results && data.results.muniCd;
+  if (!code) throw new Error('市区町村コードを特定できませんでした');
+  return String(code).padStart(5, '0');
+}
+
+/* カタログAPIのスキーマに依存しない探索。
+ * 配信サービスは実験的提供でレスポンス構造が変わりうるため、特定のキー名を
+ * 前提にせず「httpで始まりtileset.jsonを含む文字列」を再帰的に拾う。 */
+function collectTilesetUrls(node, out, depth) {
+  if (depth > 12 || node == null) return out;
+  if (typeof node === 'string') {
+    if (/^https?:\/\//.test(node) && node.includes('tileset.json')) out.add(node);
+    return out;
+  }
+  if (Array.isArray(node)) {
+    for (const v of node) collectTilesetUrls(v, out, depth + 1);
+    return out;
+  }
+  if (typeof node === 'object') {
+    for (const v of Object.values(node)) collectTilesetUrls(v, out, depth + 1);
+  }
+  return out;
+}
+
+async function findBuildingTileset(code) {
+  const res = await fetch(PLATEAU_CATALOG);
+  if (!res.ok) throw new Error('データカタログAPI HTTP ' + res.status);
+  const urls = Array.from(collectTilesetUrls(await res.json(), new Set(), 0));
+  const bldg = urls.filter(u => u.includes(code) && /bldg/i.test(u));
+  if (!bldg.length) return null;
+  const lod2 = bldg.find(u => /lod2/i.test(u));
+  return lod2 || bldg.find(u => /lod1/i.test(u)) || bldg[0];
+}
+
+function plateauStatus(text) { $('plateau-status').textContent = text; }
+
+async function openPlateau() {
+  const p = refPoint();
+  if (!p) { note('export-status', '先に敷地を描くか、住所を検索してください。', 'warn'); return; }
+  $('plateau').classList.add('show');
+  plateauStatus('CesiumJSを読み込み中…');
+  try {
+    await loadCesium();
+    if (!viewer) viewer = createViewer();
+    drawSiteInCesium();
+
+    plateauStatus('市区町村コードを解決中…');
+    const code = await muniCode(p.lat, p.lng);
+
+    plateauStatus(`3D都市モデルを探索中…（市区町村コード ${code}）`);
+    const url = await findBuildingTileset(code);
+    if (!url) { plateauStatus(`3D都市モデル未整備（市区町村コード ${code}）`); flyToSite(); return; }
+
+    plateauStatus('3D Tilesを読み込み中…');
+    const tileset = await (Cesium.Cesium3DTileset.fromUrl
+      ? Cesium.Cesium3DTileset.fromUrl(url)
+      : Promise.resolve(new Cesium.Cesium3DTileset({ url })));
+    viewer.scene.primitives.add(tileset);
+    plateauStatus(`PLATEAU 建築物モデル（${/lod2/i.test(url) ? 'LOD2' : 'LOD1'}・市区町村コード ${code}）`);
+    flyToSite();
+  } catch (e) {
+    plateauStatus('表示できませんでした: ' + (e.message || e));
+  }
+}
+
+function createViewer() {
+  const opts = {
+    baseLayerPicker: false, geocoder: false, homeButton: false, sceneModePicker: false,
+    navigationHelpButton: false, timeline: false, animation: false, infoBox: false,
+    selectionIndicator: false, fullscreenButton: false,
+  };
+  let v;
+  try { v = new Cesium.Viewer('cesium', Object.assign({ baseLayer: false }, opts)); }
+  catch (e) { v = new Cesium.Viewer('cesium', Object.assign({ imageryProvider: false }, opts)); }
+  try {
+    v.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
+      url: PLATEAU_ORTHO, maximumLevel: 19,
+      credit: 'Project PLATEAU（国土交通省）',
+    }));
+  } catch (e) {
+    /* オルソが使えない場合は地理院タイルを背景にする */
+    v.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
+      url: 'https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png',
+      maximumLevel: 18, credit: '国土地理院',
+    }));
+  }
+  v.scene.globe.depthTestAgainstTerrain = true;
+  return v;
+}
+
+function drawSiteInCesium() {
+  viewer.entities.removeAll();
+  if (!state.polygon) return;
+  const flat = [];
+  state.polygon.forEach(pt => { flat.push(pt.lng, pt.lat); });
+  flat.push(state.polygon[0].lng, state.polygon[0].lat);
+  viewer.entities.add({
+    polyline: {
+      positions: Cesium.Cartesian3.fromDegreesArray(flat),
+      width: 4, clampToGround: true,
+      material: Cesium.Color.fromCssColorString('#c1440e'),
+    },
+  });
+}
+
+function flyToSite() {
+  const p = refPoint();
+  if (!p) return;
+  viewer.camera.flyTo({
+    destination: Cesium.Cartesian3.fromDegrees(p.lng, p.lat - 0.004, 420),
+    orientation: { heading: 0, pitch: Cesium.Math.toRadians(-32), roll: 0 },
+    duration: 1.6,
+  });
+}
+
+$('btn-plateau').addEventListener('click', openPlateau);
+$('plateau-close').addEventListener('click', () => $('plateau').classList.remove('show'));
+$('plateau').addEventListener('click', ev => {
+  if (ev.target === $('plateau')) $('plateau').classList.remove('show');
+});
+
+/* ------------------------------------------------------------------ *
+ * 10. 初期化
+ * ------------------------------------------------------------------ */
+(function init() {
+  $('zone').innerHTML = ZONES.map(z => `<option value="${z.id}">${z.name}</option>`).join('');
+  $('shadow').innerHTML = SHADOW_OPTIONS.map(o => `<option value="${o.id}">${o.label}</option>`).join('');
+  $('zone').value = 'shogyo';
+  const z = ZONE_BY_ID.get('shogyo');
+  $('far').value = z.far;
+  $('bcr').value = z.bcr;
+
+  $('zone').addEventListener('change', () => {
+    const zone = ZONE_BY_ID.get($('zone').value);
+    if (zone) { $('far').value = zone.far; $('bcr').value = zone.bcr; }
+    renderSummary();
+  });
+
+  ['site-name', 'area-manual', 'far', 'bcr', 'district-plan', 'fire-zone', 'height-zone',
+   'land-price', 'road-width', 'walk-min', 'shadow'].forEach(id => {
+    $(id).addEventListener('input', () => { updateArea(); renderSummary(); });
+    $(id).addEventListener('change', () => { updateArea(); renderSummary(); });
+  });
+
+  renderSummary();
+  renderGisLinks();
+})();
+</script>
+</body>
+</html>

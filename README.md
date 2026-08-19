@@ -1,11 +1,16 @@
-# MVE / jwcad-volume
+# MVE / SiteInfo / jwcad-volume
 
-このリポジトリには2つのパッケージがあります。
+このリポジトリには3つのパッケージがあります。
 
 | | 用途 | 状態 |
 |---|---|---|
 | **`mve/`** | 日影規制・斜線制限をふまえた最大容積の計算エンジン | **現行**。日影対応をボクセル法で作り直し、複数前面道路・各種緩和・真北・測定面選択に対応 |
+| **`siteinfo/`** | 敷地の位置・形状・行政情報を集めて敷地情報GeoJSONを作るエンジン | **新規**。HBU-ANALYZER v0.4のSTEP1から分離した単一HTML |
 | `jwcad_volume/` | JW-CAD外部変形連携（JWC形式・バッチ・exe化） | 実績があるため維持。計算エンジンとしてはMVEが後継 |
+
+**SiteInfoの使い方は [`siteinfo/README.md`](siteinfo/README.md)、設計は
+[`docs/siteinfo/design_spec.md`](docs/siteinfo/design_spec.md) を参照してください。**
+`siteinfo/index.html` はブラウザで開くだけで動きます（行政GISのみElectronが要ります）。
 
 **MVEの操作手順は [`docs/mve/manual.md`](docs/mve/manual.md)（取扱説明書）、
 概要は [`docs/mve/README.md`](docs/mve/README.md)、設計の全体像は
