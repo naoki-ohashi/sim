@@ -31,12 +31,20 @@ npm install
 REINFOLIB_API_KEY=xxxxxxxx npm start     # Windowsは set REINFOLIB_API_KEY=...
 ```
 
-`electron/` は最小限のホストです。画面が期待するAPIを2つだけ提供します。
+`electron/` は最小限のホストです。画面が期待するAPIを3つ提供します。
 
 | API | 役割 |
 |---|---|
 | `window.envAPI.get(name)` | reinfolib APIキーを環境変数から読む |
-| `window.gisAPI.fetch(url, key)` | reinfolib APIをメインプロセス経由で取得する |
+| `window.gisAPI.fetch(url, key)` | reinfolib APIをメインプロセス経由で取得する（要APIキー） |
+| `window.netAPI.fetch(url)` | 地理院ジオコーダ・PLATEAUデータカタログのJSONを代行取得する（CORS回避） |
+
+別の場所にある `index.html` を開くこともできます（旧版の検証などに）。
+
+```bash
+SITEINFO_HTML="D:\GD\[Claude]\siteinfo\index.html" npm start
+npm start -- "D:\GD\[Claude]\siteinfo\index.html"
+```
 
 APIキーは[不動産情報ライブラリ](https://www.reinfolib.mlit.go.jp/)で取得します。
 キーはSTEP2の入力欄に直接入れることもできます（保存はしません）。
@@ -59,3 +67,29 @@ APIキーは[不動産情報ライブラリ](https://www.reinfolib.mlit.go.jp/)�
 - 都市計画情報は**参考値**です。正式な確認は自治体窓口で行ってください。
 - 面積は地図上のポリゴンからの**概算**であり、測量に代わるものではありません。
 - ローカルベンチマーク（`SHINJUKU_AREAS`）は新宿区内8エリアのみです。
+
+## うまく動かないとき
+
+### `Cannot read properties of undefined (reading 'fetch')`（用途地域・地区計画・防火・高度地区）
+
+`window.gisAPI` が無い状態で行政GISを呼んでいます。**Electronホスト経由で
+起動していない**（ブラウザで直接開いた、preloadが読まれていない、
+`contextIsolation` の設定が食い違っている）のが原因です。
+
+- このリポジトリ版は `window.gisAPI` の有無を先に確認し、
+  「行政GISは利用できません（window.gisAPI が未定義）」と表示して止まります。
+  上のエラーがそのまま出る場合は**別のビルドを起動しています**。
+- 対処: `cd siteinfo/electron && REINFOLIB_API_KEY=… npm start` で起動する。
+  旧版のHTMLを使いたい場合は `SITEINFO_HTML=…` で指定すれば、このホストの
+  `window.gisAPI` がそのまま使えます。
+
+### PLATEAU 3D表示が出ない
+
+モーダル上部のステータス欄に、どの段階で失敗したかが出ます。
+
+| 表示 | 原因と対処 |
+|---|---|
+| `CesiumJSを読み込めませんでした（…）` | CDNに到達できない。社内プロキシ・オフライン環境を確認する（cesium.com → unpkg → jsDelivr の順に試します） |
+| `リバースジオコーダに接続できません（…）` | 地理院APIに届いていない。ブラウザで開いている場合はCORSの可能性があるためElectronで起動する |
+| `データカタログAPIに接続できません（…）` | PLATEAU配信サービスに届いていない。同上 |
+| `3D都市モデル未整備（市区町村コード …）` | その自治体のデータが無い。tileset.jsonのURLが分かればモーダル上部の欄に直接入力できる |

@@ -297,6 +297,8 @@
     <div id="plateau-head">
       <h2>PLATEAU 3D都市モデル</h2>
       <span class="status" id="plateau-status"></span>
+      <input type="text" id="plateau-url" class="wide" placeholder="tileset.json を直接指定（任意）">
+      <button id="plateau-load">読み込む</button>
       <button id="plateau-close">閉じる</button>
     </div>
     <div id="cesium"></div>
@@ -674,9 +676,7 @@ async function search() {
   hits.innerHTML = '<li>検索中…</li>';
   hits.classList.add('show');
   try {
-    const res = await fetch(GEOCODE_URL + encodeURIComponent(q));
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const list = await res.json();
+    const list = await fetchJson(GEOCODE_URL + encodeURIComponent(q));
     if (!Array.isArray(list) || !list.length) {
       hits.innerHTML = '<li>該当なし。町名までで試してください。</li>';
       return;
@@ -828,12 +828,26 @@ function hasGisHost() {
   return !!(window.gisAPI && typeof window.gisAPI.fetch === 'function');
 }
 
+/* JSONの取得。Electronホストに netAPI があればメインプロセス経由で取る。
+ * file:// で開いたときのOrigin: null や、CORSヘッダを返さないAPI（地理院の
+ * リバースジオコーダ、PLATEAUのデータカタログ）で失敗しないようにするため。
+ * ホストが無ければ素の fetch にフォールバックする。 */
+async function fetchJson(url) {
+  if (window.netAPI && typeof window.netAPI.fetch === 'function') {
+    const body = await window.netAPI.fetch(url);
+    return (typeof body === 'string') ? JSON.parse(body) : body;
+  }
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
+
 function showHostNote() {
   const el = $('host-note');
   if (hasGisHost()) { el.style.display = 'none'; return; }
   el.className = 'note warn';
   el.style.display = 'block';
-  el.innerHTML = '<b>行政GISは利用できません。</b>' +
+  el.innerHTML = '<b>行政GISは利用できません（window.gisAPI が未定義）。</b>' +
     'reinfolibはCORS制限のためブラウザから直接取得できず、Electronホストの ' +
     '<code>window.gisAPI.fetch</code> が必要です。地図・描画・GeoJSON入出力・PLATEAUは' +
     'そのまま使えます。用途地域などはSTEP2に手入力すればGeoJSONは作れます。';
@@ -1203,37 +1217,61 @@ $('btn-copy').addEventListener('click', async () => {
  * Cesium ionのトークンを使わない構成のため、APIキー・利用登録は不要。
  * ------------------------------------------------------------------ */
 const CESIUM_VERSION = '1.118';
-const CESIUM_BASE = `https://cesium.com/downloads/cesiumjs/releases/${CESIUM_VERSION}/Build/Cesium/`;
+/* CDNは1つに賭けない。前から順に試す。 */
+const CESIUM_BASES = [
+  `https://cesium.com/downloads/cesiumjs/releases/${CESIUM_VERSION}/Build/Cesium/`,
+  `https://unpkg.com/cesium@${CESIUM_VERSION}/Build/Cesium/`,
+  `https://cdn.jsdelivr.net/npm/cesium@${CESIUM_VERSION}/Build/Cesium/`,
+];
 const REVERSE_GEOCODER = 'https://mreversegeocoder.gsi.go.jp/reverse-geocoder/LonLatToAddress';
-const PLATEAU_CATALOG = 'https://api.plateauview.mlit.go.jp/datacatalog/plateau-datasets';
+/* データカタログAPIも配信元が変わりうるため候補を持つ。 */
+const PLATEAU_CATALOGS = [
+  'https://api.plateauview.mlit.go.jp/datacatalog/plateau-datasets',
+  'https://api.plateauview.mlit.go.jp/datacatalog/plateau-datasets/all',
+  'https://api.plateau.reearth.io/datacatalog/plateau-datasets',
+];
 const PLATEAU_ORTHO = 'https://gic-plateau.s3.ap-northeast-1.amazonaws.com/2020/ortho/tiles/{z}/{x}/{y}.png';
 
 let cesiumLoading = null;
 let viewer = null;
 
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const js = document.createElement('script');
+    js.src = src;
+    js.onload = () => resolve();
+    js.onerror = () => reject(new Error('読み込み失敗: ' + src));
+    document.head.appendChild(js);
+  });
+}
+
 function loadCesium() {
   if (window.Cesium) return Promise.resolve();
   if (cesiumLoading) return cesiumLoading;
-  window.CESIUM_BASE_URL = CESIUM_BASE;
-  cesiumLoading = new Promise((resolve, reject) => {
-    const css = document.createElement('link');
-    css.rel = 'stylesheet';
-    css.href = CESIUM_BASE + 'Widgets/widgets.css';
-    document.head.appendChild(css);
-    const js = document.createElement('script');
-    js.src = CESIUM_BASE + 'Cesium.js';
-    js.onload = () => resolve();
-    js.onerror = () => reject(new Error('CesiumJSを読み込めませんでした'));
-    document.head.appendChild(js);
-  });
+  cesiumLoading = (async () => {
+    const errors = [];
+    for (const base of CESIUM_BASES) {
+      window.CESIUM_BASE_URL = base;
+      const css = document.createElement('link');
+      css.rel = 'stylesheet';
+      css.href = base + 'Widgets/widgets.css';
+      document.head.appendChild(css);
+      try {
+        await loadScript(base + 'Cesium.js');
+        if (window.Cesium) return;
+      } catch (e) { errors.push(e.message); }
+      css.remove();
+    }
+    throw new Error('CesiumJSを読み込めませんでした（' + errors.join(' / ') + '）');
+  })();
   return cesiumLoading;
 }
 
 /* 緯度経度 → 5桁の市区町村コード */
 async function muniCode(lat, lng) {
-  const res = await fetch(`${REVERSE_GEOCODER}?lat=${lat}&lon=${lng}`);
-  if (!res.ok) throw new Error('リバースジオコーダ HTTP ' + res.status);
-  const data = await res.json();
+  let data;
+  try { data = await fetchJson(`${REVERSE_GEOCODER}?lat=${lat}&lon=${lng}`); }
+  catch (e) { throw new Error('リバースジオコーダに接続できません（' + (e.message || e) + '）'); }
   const code = data && data.results && data.results.muniCd;
   if (!code) throw new Error('市区町村コードを特定できませんでした');
   return String(code).padStart(5, '0');
@@ -1259,13 +1297,21 @@ function collectTilesetUrls(node, out, depth) {
 }
 
 async function findBuildingTileset(code) {
-  const res = await fetch(PLATEAU_CATALOG);
-  if (!res.ok) throw new Error('データカタログAPI HTTP ' + res.status);
-  const urls = Array.from(collectTilesetUrls(await res.json(), new Set(), 0));
-  const bldg = urls.filter(u => u.includes(code) && /bldg/i.test(u));
-  if (!bldg.length) return null;
-  const lod2 = bldg.find(u => /lod2/i.test(u));
-  return lod2 || bldg.find(u => /lod1/i.test(u)) || bldg[0];
+  const errors = [];
+  let anyCatalog = false;
+  for (const catalog of PLATEAU_CATALOGS) {
+    let data;
+    try { data = await fetchJson(catalog); }
+    catch (e) { errors.push(`${catalog}: ${e.message || e}`); continue; }
+    anyCatalog = true;
+    const urls = Array.from(collectTilesetUrls(data, new Set(), 0));
+    const bldg = urls.filter(u => u.includes(code) && /bldg/i.test(u));
+    if (!bldg.length) continue;
+    const lod2 = bldg.find(u => /lod2/i.test(u));
+    return { url: lod2 || bldg.find(u => /lod1/i.test(u)) || bldg[0], catalog };
+  }
+  if (!anyCatalog) throw new Error('データカタログAPIに接続できません（' + errors.join(' / ') + '）');
+  return null;
 }
 
 function plateauStatus(text) { $('plateau-status').textContent = text; }
@@ -1274,29 +1320,44 @@ async function openPlateau() {
   const p = refPoint();
   if (!p) { note('export-status', '先に敷地を描くか、住所を検索してください。', 'warn'); return; }
   $('plateau').classList.add('show');
+  const manual = $('plateau-url').value.trim();
   plateauStatus('CesiumJSを読み込み中…');
   try {
     await loadCesium();
     if (!viewer) viewer = createViewer();
     drawSiteInCesium();
+    flyToSite();          /* タイルの前に敷地上空へ寄せる（失敗しても位置は見える） */
+
+    if (manual) {
+      await addTileset(manual);
+      plateauStatus('手動指定のtilesetを表示しました');
+      return;
+    }
 
     plateauStatus('市区町村コードを解決中…');
     const code = await muniCode(p.lat, p.lng);
 
     plateauStatus(`3D都市モデルを探索中…（市区町村コード ${code}）`);
-    const url = await findBuildingTileset(code);
-    if (!url) { plateauStatus(`3D都市モデル未整備（市区町村コード ${code}）`); flyToSite(); return; }
+    const hit = await findBuildingTileset(code);
+    if (!hit) {
+      plateauStatus(`3D都市モデル未整備（市区町村コード ${code}）。tileset.jsonのURLが分かれば上の欄に直接入力できます。`);
+      return;
+    }
 
     plateauStatus('3D Tilesを読み込み中…');
-    const tileset = await (Cesium.Cesium3DTileset.fromUrl
-      ? Cesium.Cesium3DTileset.fromUrl(url)
-      : Promise.resolve(new Cesium.Cesium3DTileset({ url })));
-    viewer.scene.primitives.add(tileset);
-    plateauStatus(`PLATEAU 建築物モデル（${/lod2/i.test(url) ? 'LOD2' : 'LOD1'}・市区町村コード ${code}）`);
-    flyToSite();
+    await addTileset(hit.url);
+    plateauStatus(`PLATEAU 建築物モデル（${/lod2/i.test(hit.url) ? 'LOD2' : 'LOD1'}・市区町村コード ${code}）`);
   } catch (e) {
     plateauStatus('表示できませんでした: ' + (e.message || e));
   }
+}
+
+async function addTileset(url) {
+  const tileset = await (Cesium.Cesium3DTileset.fromUrl
+    ? Cesium.Cesium3DTileset.fromUrl(url)
+    : Promise.resolve(new Cesium.Cesium3DTileset({ url })));
+  viewer.scene.primitives.add(tileset);
+  return tileset;
 }
 
 function createViewer() {
@@ -1350,6 +1411,7 @@ function flyToSite() {
 }
 
 $('btn-plateau').addEventListener('click', openPlateau);
+$('plateau-load').addEventListener('click', openPlateau);
 $('plateau-close').addEventListener('click', () => $('plateau').classList.remove('show'));
 $('plateau').addEventListener('click', ev => {
   if (ev.target === $('plateau')) $('plateau').classList.remove('show');
