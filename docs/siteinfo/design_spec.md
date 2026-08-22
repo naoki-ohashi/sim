@@ -75,7 +75,7 @@ SiteInfo ──[敷地情報GeoJSON]──┬──▶ HBU-ANALYZER    用途と
     1. マスタデータ    ZONES, SHINJUKU_AREAS, SHADOW_OPTIONS, LAYERS
     2. 幾何            polygonAreaM2, ringContains, geometryContains, tileXY
     3-4. ヘルパと状態
-    5. 地図            Leaflet + 国土地理院タイル
+    5. 地図            Leaflet + 切り替え可能な背景地図（BASEMAPS）
     6. STEP1           住所検索・描画・GeoJSON読み込み
     7. STEP2           行政GIS連携（reinfolib）
     8. STEP3           敷地情報GeoJSONの組み立てと書き出し
@@ -278,7 +278,8 @@ HBU-ANALYZERは値が入っている属性だけを反映し（`setIfPresent`）
 
 | 用途 | 接続先 | 認証 | Electron外 |
 |---|---|---|---|
-| 地図タイル | 国土地理院 XYZタイル（標準地図／航空写真） | 不要 | ✅ |
+| 地図タイル | 国土地理院 XYZタイル（標準地図／淡色地図／航空写真） | 不要 | ✅ |
+| 地図タイル（任意） | OpenStreetMap ／ OpenTopoMap | 不要 | ✅ |
 | ジオコーディング | 国土地理院 住所検索API | 不要 | ✅ |
 | リバースジオコーディング | 国土地理院 LonLatToAddress | 不要 | ✅ |
 | 行政GIS（4層＋地価） | 不動産情報ライブラリ（reinfolib） | APIキー | ❌ |
@@ -286,7 +287,13 @@ HBU-ANALYZERは値が入っている属性だけを反映し（`setIfPresent`）
 | 地図・3Dライブラリ | cdnjs（Leaflet）／ Cesium公式CDN | 不要 | ✅ |
 
 **Googleは使用しない**：地図・3D・口コミのいずれについてもGoogleのサービスは
-使わない方針（SIMワールド共通）。地図は国土地理院、3DはPLATEAUで揃えている。
+使わない方針（SIMワールド共通）。地図の既定は国土地理院、3DはPLATEAUで揃えている。
+
+**背景地図の切り替え**：地図右上のセレクタで背景地図を選べる。選択肢は
+`index.html` の `BASEMAPS` 配列で定義しており、XYZタイル配信であれば1行足すだけで
+増やせる。GeoJSON Player など他のビューアと同じ絵を並べて確認したい場合のために、
+国土地理院タイルに加えてOSM系のタイルも既定で入れてある。選択内容は
+`localStorage`（キー `siteinfo.basemap`）に保存され、次回起動時に復元される。
 
 ---
 

@@ -78,7 +78,9 @@
   #maparea { flex:1; min-height:240px; position:relative; }
   #map { position:absolute; inset:0; background:var(--bg); }
   #maptools { position:absolute; z-index:500; right:10px; top:10px; display:flex; gap:6px; }
-  #maptools button { background:var(--panel); box-shadow:0 1px 5px rgba(0,0,0,.2); font-size:12px; }
+  #maptools button, #maptools select {
+    background:var(--panel); box-shadow:0 1px 5px rgba(0,0,0,.2); font-size:12px; }
+  #maptools select { border:1px solid var(--border); border-radius:7px; padding:4px 7px; color:inherit; }
   #mapmsg { position:absolute; z-index:500; left:50%; transform:translateX(-50%); top:10px;
             background:var(--panel); border:1px solid var(--accent); color:var(--accent);
             border-radius:7px; padding:5px 13px; font-size:12px; font-weight:700;
@@ -281,7 +283,7 @@
       <div id="map"></div>
       <div id="mapmsg"></div>
       <div id="maptools">
-        <button id="btn-base">航空写真</button>
+        <select id="sel-base" title="背景地図を切り替えます"></select>
       </div>
     </div>
     <div id="summary">
@@ -538,23 +540,66 @@ let mode = 'idle';    /* 'idle' | 'draw' | 'info' */
 let drafting = [];    /* 描画中の頂点 */
 
 /* ------------------------------------------------------------------ *
- * 5. 地図（Leaflet + 国土地理院タイル）
+ * 5. 地図（Leaflet + 切り替え可能な背景地図）
  * ------------------------------------------------------------------ */
 const GSI_ATTR = '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">国土地理院</a>';
+const OSM_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors';
+
+/* 背景地図の一覧。GeoJSON Player など他ツールと同じ絵を見たいときのために、
+ * 国土地理院タイルに加えてOSM系のタイルも選べるようにしている。
+ * 追加したいタイルサービスがあればこの配列に足すだけでよい。 */
+const BASEMAPS = [
+  { id: 'gsi-std',   label: '地理院 標準地図', url: 'https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png',
+    opts: { maxZoom: 18, attribution: GSI_ATTR } },
+  { id: 'gsi-pale',  label: '地理院 淡色地図', url: 'https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png',
+    opts: { maxZoom: 18, attribution: GSI_ATTR } },
+  { id: 'gsi-photo', label: '地理院 航空写真', url: 'https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg',
+    opts: { maxZoom: 18, attribution: GSI_ATTR } },
+  { id: 'osm',       label: 'OpenStreetMap',  url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    opts: { maxZoom: 19, attribution: OSM_ATTR } },
+  { id: 'opentopo',  label: 'OpenTopoMap',    url: 'https://tile.opentopomap.org/{z}/{x}/{y}.png',
+    opts: { maxZoom: 17, attribution: OSM_ATTR + ' | &copy; <a href="https://opentopomap.org/" target="_blank" rel="noopener">OpenTopoMap</a> (CC-BY-SA)' } },
+];
+const BASEMAP_PREF_KEY = 'siteinfo.basemap';
 
 /* Leafletが読めない環境（オフライン等）でも、地図以外は動かし続ける。 */
 const hasMap = (typeof L !== 'undefined');
-let map = null, baseStd = null, basePhoto = null;
+let map = null;
 let sitePoly = null, draftLine = null, draftDots = null, searchMarker = null;
-let photoOn = false;
+
+/* 生成済みタイルレイヤ（選ばれたときに初めて作る） */
+const baseLayers = {};
+let currentBase = null;
+
+function baseLayerFor(id) {
+  if (!baseLayers[id]) {
+    const def = BASEMAPS.find(b => b.id === id) || BASEMAPS[0];
+    baseLayers[def.id] = L.tileLayer(def.url, def.opts);
+    return baseLayers[def.id];
+  }
+  return baseLayers[id];
+}
+
+function setBasemap(id) {
+  const next = baseLayerFor(id);
+  if (next === currentBase) return;
+  if (currentBase) map.removeLayer(currentBase);
+  map.addLayer(next);
+  currentBase = next;
+  try { localStorage.setItem(BASEMAP_PREF_KEY, id); } catch (e) { /* 保存できなくても動作に支障はない */ }
+}
+
+function initialBasemapId() {
+  let saved = null;
+  try { saved = localStorage.getItem(BASEMAP_PREF_KEY); } catch (e) { /* 同上 */ }
+  return BASEMAPS.some(b => b.id === saved) ? saved : BASEMAPS[0].id;
+}
 
 if (hasMap) {
-  baseStd = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png',
-    { maxZoom: 18, attribution: GSI_ATTR });
-  basePhoto = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg',
-    { maxZoom: 18, attribution: GSI_ATTR });
+  const startId = initialBasemapId();
+  currentBase = baseLayerFor(startId);
 
-  map = L.map('map', { center: [35.6938, 139.7036], zoom: 16, layers: [baseStd], zoomControl: true });
+  map = L.map('map', { center: [35.6938, 139.7036], zoom: 16, layers: [currentBase], zoomControl: true });
   sitePoly = L.polygon([], { color: '#c1440e', weight: 3, fillOpacity: 0.16 }).addTo(map);
   draftLine = L.polyline([], { color: '#1d5a7a', weight: 2, dashArray: '5,4' }).addTo(map);
   draftDots = L.layerGroup().addTo(map);
@@ -565,19 +610,22 @@ if (hasMap) {
     else if (mode === 'info') { showPointInfo(p); }
   });
 
-  $('btn-base').addEventListener('click', () => {
-    photoOn = !photoOn;
-    map.removeLayer(photoOn ? baseStd : basePhoto);
-    map.addLayer(photoOn ? basePhoto : baseStd);
-    $('btn-base').textContent = photoOn ? '標準地図' : '航空写真';
+  const sel = $('sel-base');
+  BASEMAPS.forEach(b => {
+    const opt = document.createElement('option');
+    opt.value = b.id;
+    opt.textContent = b.label;
+    sel.appendChild(opt);
   });
+  sel.value = startId;
+  sel.addEventListener('change', () => setBasemap(sel.value));
 } else {
   $('map').innerHTML =
     '<div style="padding:24px;line-height:1.7;color:inherit">' +
     '<b>地図ライブラリ（Leaflet）を読み込めませんでした。</b><br>' +
     'ネットワークに接続できない環境では地図が使えません。' +
     'GeoJSONの読み込み・STEP2の手入力・書き出しはそのまま使えます。</div>';
-  $('btn-base').disabled = true;
+  $('sel-base').disabled = true;
   $('btn-draw').disabled = true;
   $('btn-info').disabled = true;
 }

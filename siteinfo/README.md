@@ -54,6 +54,15 @@ APIキーは[不動産情報ライブラリ](https://www.reinfolib.mlit.go.jp/)�
 「PLATEAUで3D表示」は、国土交通省 Project PLATEAUの3D Tilesを表示します
 （CesiumJSは初回クリック時に遅延ロード。APIキー・利用登録は不要）。
 
+## 背景地図の切り替え
+
+地図右上のセレクタで背景地図を選べます。既定は国土地理院の標準地図で、
+淡色地図・航空写真のほか、GeoJSON Playerなど他のビューアと同じ絵で確認できるよう
+OpenStreetMap・OpenTopoMapも選べます。選択内容はブラウザに保存され、次回も復元されます。
+
+別のタイルサービスを足したい場合は、`index.html` の `BASEMAPS` 配列に
+`{ id, label, url, opts }` を1件追加してください（XYZタイル配信であればそのまま使えます）。
+
 ## 注意
 
 - 都市計画情報は**参考値**です。正式な確認は自治体窓口で行ってください。
