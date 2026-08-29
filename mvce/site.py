@@ -16,6 +16,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
+from typing import Optional
+
+from .crs import CrsContext
 from .geometry import Point, dedupe_ring, polygon_area, polygon_signed_area
 from .north import NorthReference
 from .zoning import ZoningParams
@@ -114,6 +117,12 @@ class Site:
     north: NorthReference = field(default_factory=NorthReference)
     floor_height_m: float = 3.2
     name: str = ""
+    #: JGD2011 平面直角座標系の文脈（GIS 由来の敷地のみ）。`crs.py` 参照。
+    #: `points` は常にローカル系（x=東, y=北, メートル）で、ここには
+    #: 「どの系のどこを原点にしたか」だけが入ります。手描き図面から
+    #: 起こした敷地では None のままで、その場合は子午線収差角の補正が
+    #: 効かないので真北は人が与える必要があります。
+    crs: Optional[CrsContext] = None
 
     def __post_init__(self) -> None:
         self.points = dedupe_ring(self.points)
@@ -170,6 +179,7 @@ class Site:
         north: NorthReference | None = None,
         floor_height_m: float = 3.2,
         name: str = "",
+        crs: Optional[CrsContext] = None,
     ) -> "Site":
         """頂点列と辺の設定（dict）から Site を作る。
 
@@ -199,6 +209,7 @@ class Site:
         return cls(
             points=pts, edges=edges, zoning=zoning,
             north=north or NorthReference(), floor_height_m=floor_height_m, name=name,
+            crs=crs,
         )
 
 
