@@ -24,8 +24,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from mve.io.dxf_pen import JwwDrawing          # noqa: E402
-from mve.io.dxf_r12 import R12Drawing          # noqa: E402
+from mvce.io.dxf_pen import JwwDrawing          # noqa: E402
+from mvce.io.dxf_r12 import R12Drawing          # noqa: E402
 
 SQUARE = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]
 

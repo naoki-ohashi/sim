@@ -16,14 +16,14 @@ dev = ["pytest>=7.0"]
 [project.scripts]
 jwcad-volume = "jwcad_volume.cli:main"
 jwcad-volume-gaihen = "jwcad_volume.gaihen:main"
-mve = "mve.cli:main"
+mvce = "mvce.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["jwcad_volume*", "mve*"]
+include = ["jwcad_volume*", "mvce*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

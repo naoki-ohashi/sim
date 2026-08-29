@@ -4,7 +4,7 @@
 #   copy examples\敷地入力テンプレート.yaml 自分の敷地.yaml
 #   mve 自分の敷地.yaml --cell 2.0
 #
-# 迷ったら examples/mve_sample.yaml に全項目の説明があります。
+# 迷ったら examples/mvce_sample.yaml に全項目の説明があります。
 
 site:
   name: 自分の敷地
