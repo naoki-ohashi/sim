@@ -54,6 +54,7 @@ import numpy as np
 from shapely.geometry import Polygon
 
 from ..far import FarResult, compute_far
+from ..zoning import UndeterminedRegulation
 from ..index.shadow_index import ShadowIndex, build_shadow_index
 from ..index.sky_index import SkyIndex, SkyRatioSummary, build_sky_index, summarize
 from ..inverse.shadow_envelope import RoofPlaneSpec, search_roof_envelope
@@ -209,6 +210,42 @@ class OptimizeResult:
         lines.extend(self.far.notes)
         lines.extend(self.notes)
         return lines
+
+
+def _ground_plane_notes(site) -> list[str]:
+    """令2条2項の地盤面についての注記。
+
+    **高さはまだ Z=0 から測っています。** 地盤面の算定（`ground.py`）は
+    できるようになりましたが、斜線・絶対高さ・日影の測定面をそこから測る
+    ところまでは繋いでいません。平坦地では差が出ませんが、地盤の高さを
+    与えた敷地では黙って無視するのが一番まずいので、注記を出します。
+    """
+    levels = getattr(site, "ground_levels", None)
+    if not levels:
+        return []
+    span = max(levels) - min(levels)
+    if span <= 1e-9:
+        if abs(levels[0]) <= 1e-9:
+            return []
+        return [
+            f"地盤の高さが一様に {levels[0]:+.2f}m ですが、高さはすべて"
+            "Z=0 から測っています（一様なので相対的な結果は変わりません）。"
+        ]
+    try:
+        plane = site.ground_plane()
+    except UndeterminedRegulation as e:
+        return [
+            f"令2条2項の地盤面が求まりません: {e}",
+            "**高さの判定は Z=0 を地盤面として行っています。**"
+            "傾斜地では結果が実際とずれます。",
+        ]
+    return [
+        f"令2条2項の平均地盤面: {plane.level_m:+.3f}m"
+        f"（接地位置の高低差 {span:.2f}m）。"
+        "**ただし高さの判定はまだ Z=0 から測っています。**"
+        "斜線・絶対高さ・日影の測定面を平均地盤面から測るところまでは"
+        "繋いでいないので、傾斜地では結果が実際とずれます。",
+    ]
 
 
 # --- 各段階 ---------------------------------------------------------
@@ -523,6 +560,7 @@ def optimize(
         raise ValueError(f"envelope_family は {'/'.join(ENVELOPE_FAMILIES)} のいずれかにしてください")
     far = compute_far(site)
     notes: list[str] = []
+    notes.extend(_ground_plane_notes(site))
 
     area = build_mesh(
         site,

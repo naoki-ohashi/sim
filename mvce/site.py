@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
-from typing import Optional
+from typing import Optional, Sequence
 
 from .crs import CrsContext
 from .geometry import Point, dedupe_ring, polygon_area, polygon_signed_area
@@ -223,6 +223,11 @@ class Site:
     #: 既定の False は令132条1項によるということで、保守側です。
     apply_article_134_2: bool = False
 
+    #: 敷地の各頂点の地盤の高さ（GL, m）。`points` と同じ数・同じ順。
+    #: `None` なら地盤の情報が無い＝平坦（Z=0）として扱います。
+    #: 令2条2項の平均地盤面はここから求めます（`ground_contour()`）。
+    ground_levels: Optional[tuple[float, ...]] = None
+
     #: JGD2011 平面直角座標系の文脈（GIS 由来の敷地のみ）。`crs.py` 参照。
     #: `points` は常にローカル系（x=東, y=北, メートル）で、ここには
     #: 「どの系のどこを原点にしたか」だけが入ります。手描き図面から
@@ -247,6 +252,43 @@ class Site:
             p1, p2 = self.points[i], self.points[(i + 1) % len(self.points)]
             if not (_same(edge.p1, p1) and _same(edge.p2, p2)):
                 raise ValueError(f"edges[{i}] の端点が points[{i}]→points[{i+1}] と一致しません")
+        if self.ground_levels is not None:
+            self.ground_levels = tuple(float(z) for z in self.ground_levels)
+            if len(self.ground_levels) != len(self.points):
+                raise ValueError(
+                    f"ground_levels の数({len(self.ground_levels)})が"
+                    f"頂点の数({len(self.points)})と一致しません"
+                )
+
+    # --- 地盤 -------------------------------------------------------
+    def ground_contour(self) -> list:
+        """敷地境界線を接地線とみなした `ContactPoint` の並び。
+
+        **令2条2項が測るのは「建築物が周囲の地面と接する位置」です。**
+        敷地境界線ではありません。これは「建物が敷地境界いっぱいに建つ」と
+        置いたときの接地線で、壁面後退を取る計画では実際の接地線と違います。
+        実際の輪郭が決まっているなら、その輪郭で `ContactPoint` を作って
+        `ground.ground_plane()` に渡してください。
+
+        `ground_levels` が無いときは平坦（すべて0）として返します。
+        """
+        from .ground import ContactPoint
+
+        levels = self.ground_levels or (0.0,) * len(self.points)
+        return [ContactPoint(p, z) for p, z in zip(self.points, levels)]
+
+    def ground_plane(self, **kwargs):
+        """敷地境界線を接地線とした令2条2項の地盤面。
+
+        地盤の情報が無ければ Z=0 の平坦地。高低差が3mを超えると
+        `UndeterminedRegulation`（区分の切り方が条文に無いため）。
+        接地線の取り方の注意は `ground_contour()` の docstring を参照。
+        """
+        from .ground import flat_ground_plane, ground_plane
+
+        if self.ground_levels is None:
+            return flat_ground_plane(0.0)
+        return ground_plane(self.ground_contour(), closed=True, **kwargs)
 
     # --- 面積・上限 -------------------------------------------------
     @property
@@ -294,6 +336,7 @@ class Site:
         crs: Optional[CrsContext] = None,
         apply_article_134_2: bool = False,
         railway_is_adjacent_relaxation: bool = False,
+        ground_levels: Optional[Sequence[float]] = None,
     ) -> "Site":
         """頂点列と辺の設定（dict）から Site を作る。
 
@@ -302,6 +345,11 @@ class Site:
         """
         pts = dedupe_ring(points)
         specs = list(edge_specs)
+        levels = list(ground_levels) if ground_levels is not None else None
+        if levels is not None and len(levels) != len(pts):
+            raise ValueError(
+                f"ground_levels の数({len(levels)})が頂点の数({len(pts)})と一致しません"
+            )
         if len(specs) != len(pts):
             raise ValueError(f"辺の設定({len(specs)})が頂点の数({len(pts)})と一致しません")
         if polygon_signed_area(pts) < 0:
@@ -309,6 +357,8 @@ class Site:
             n = len(pts)
             pts = pts[::-1]
             specs = [specs[(n - 2 - i) % n] for i in range(n)]
+            if levels is not None:
+                levels = levels[::-1]
         edges = []
         for i, spec in enumerate(specs):
             p1, p2 = pts[i], pts[(i + 1) % len(pts)]
@@ -336,6 +386,7 @@ class Site:
             north=north or NorthReference(), floor_height_m=floor_height_m, name=name,
             crs=crs, apply_article_134_2=apply_article_134_2,
             railway_is_adjacent_relaxation=railway_is_adjacent_relaxation,
+            ground_levels=tuple(levels) if levels is not None else None,
         )
 
 
