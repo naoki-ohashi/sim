@@ -277,9 +277,13 @@
   const FAR_ROAD_WIDTH_THRESHOLD_M = 12.0;
 
   // 緩和対象（斜線ごとに違う。詳細は docs/mvce/legal_basis.md）
-  const ROAD_RELAX = new Set(['park', 'water']);           // 令134条: 幅の全部
-  const ADJACENT_RELAX = new Set(['park', 'water', 'railway']); // 令135条の3: 幅の1/2
-  const NORTH_RELAX = new Set(['water', 'railway']);       // 令135条の4: 公園は対象外
+  // 4条文がそれぞれ違うものを列挙している。Python版の RelaxationKind の表を参照。
+  // 令134条: 公園・広場・水面（線路敷は列挙なし、都市公園の除外も無い）
+  const ROAD_RELAX = new Set(['park', 'urban_park', 'water']);
+  // 令135条の3: 公園（都市公園を除く）・広場・水面（線路敷は列挙なし）
+  const ADJACENT_RELAX = new Set(['park', 'water']);
+  // 令135条の4: 水面・線路敷（公園・広場は列挙なし）
+  const NORTH_RELAX = new Set(['water', 'railway']);
   // 令135条の12第3項第1号は「道路、水面、線路敷その他これらに類するもの」。
   // 公園・広場は列挙されていないので既定では外す。含める運用の行政庁に
   // 合わせるときは spec.parkIsDeemedBoundary = true。
@@ -318,16 +322,53 @@
   const maxFloorArea = site => siteArea(site) * computeFar(site).effective;
 
   // ===== 斜線制限 =====================================================
+  // groundLevelDiffM は「辺の外側（路面／隣地の地盤面）が敷地の地盤面より
+  // 何m高いか」の符号つき。緩和が効く向きは斜線の種類で違う。
+  //   令135条の2（道路）      … 敷地が道路より1m以上【高い】とき
+  //   令135条の3第1項2号（隣地）… 敷地が隣地より1m以上【低い】とき
+  //   令135条の4第1項2号（北側）… 敷地が北側隣地より1m以上【低い】とき
   const levelRelax = e => (e.groundLevelDiffM >= 1.0 ? (e.groundLevelDiffM - 1.0) / 2 : 0);
+  const roadLevelRelax = e => (-e.groundLevelDiffM >= 1.0 ? (-e.groundLevelDiffM - 1.0) / 2 : 0);
+  function adjacentRelaxKinds(site) {
+    if (!site.railwayIsAdjacentRelaxation) return ADJACENT_RELAX;
+    return new Set([...ADJACENT_RELAX, 'railway']);
+  }
   function relaxWidth(edge, kinds, halve) {
     const r = edge.relaxation;
     if (!r || !r.kind || r.kind === 'none' || !(r.widthM > 0) || !kinds.has(r.kind)) return 0;
     return halve ? r.widthM / 2 : r.widthM;
   }
 
-  // 令132条: 2以上の前面道路がある場合の幅員の読み替え
+  // 令134条2項: 公園等がある前面道路を基準にする選択規定（Site.applyArticle1342）
+  function article1342Span(site, point) {
+    if (!site.applyArticle1342) return null;
+    const roads = site.edges.filter(e => e.kind === 'road');
+    if (roads.length < 2) return null;
+    const withPark = roads.filter(r => r.relaxation && ROAD_RELAX.has(r.relaxation.kind)
+                                       && r.relaxation.widthM > 0);
+    let best = null;
+    for (const base of withPark) {
+      const span = base.roadWidthM + base.relaxation.widthM;
+      const dBase = pointLineDistance(point, base.p1, base.p2);
+      const inA = dBase <= 2 * span + 1e-9 && dBase <= 35 + 1e-9;
+      const others = roads.filter(r => r !== base);
+      const inB = others.every(r =>
+        pointLineDistance(point, r.p1, r.p2) + r.roadWidthM / 2 > 10 + 1e-9);
+      if (!(inA || inB)) continue;
+      if (best === null || span > best[0] + best[1]) best = [base.roadWidthM, base.relaxation.widthM];
+    }
+    return best;
+  }
+
+  // 令132条: 2以上の前面道路がある場合の幅員の読み替え。
+  // 3本以上は 2項の運用が分かれるので計算しない（Python版と同じ）。
   function appliedRoadWidth(site, point, edge) {
     const roads = site.edges.filter(e => e.kind === 'road');
+    if (roads.length >= 3) {
+      throw new Error(
+        '前面道路が' + roads.length + '本あります。令132条2項の「これらの前面道路のみを' +
+        '前面道路とする」の扱いは行政庁の運用が分かれるため、2本用の式では計算しません');
+    }
     const widest = maxRoadWidth(site);
     if (roads.length < 2 || edge.roadWidthM >= widest) return edge.roadWidthM;
     const wideEdge = roads.reduce((a, b) => (b.roadWidthM > a.roadWidthM ? b : a));
@@ -345,10 +386,11 @@
       site.zoning.unspecifiedRoadSlantSlope);
     let limit = Infinity;
     for (const edge of roads) {
-      const width = appliedRoadWidth(site, point, edge);
+      const span = article1342Span(site, point);
+      const width = span ? span[0] : appliedRoadWidth(site, point, edge);
       const L = pointLineDistance(point, edge.p1, edge.p2) + width + edge.wallSetbackM
-              + relaxWidth(edge, ROAD_RELAX, false);
-      const h = L > tier.dist + 1e-9 ? Infinity : tier.slope * L + levelRelax(edge);
+              + (span ? span[1] : relaxWidth(edge, ROAD_RELAX, false));
+      const h = L > tier.dist + 1e-9 ? Infinity : tier.slope * L + roadLevelRelax(edge);
       if (h < limit) limit = h;
     }
     return limit;
@@ -382,7 +424,7 @@
     for (const edge of site.edges) {
       if (edge.kind !== 'adjacent') continue;
       const L = pointLineDistance(point, edge.p1, edge.p2) + edge.wallSetbackM
-              + relaxWidth(edge, ADJACENT_RELAX, true);
+              + relaxWidth(edge, adjacentRelaxKinds(site), true);
       const h = start + slope * L + levelRelax(edge);
       if (h < limit) limit = h;
     }
@@ -434,7 +476,7 @@
     const tier = roadSlantTier(site.zoning.zoneType, site.zoning.farRatio,
       site.zoning.unspecifiedRoadSlantSlope);
     const base = edge.roadWidthM + edge.wallSetbackM + relaxWidth(edge, ROAD_RELAX, false);
-    const level = levelRelax(edge);
+    const level = roadLevelRelax(edge);
     const h0 = tier.slope * base + level;
     if (heightM <= h0) return 0;
     const neededTotal = (heightM - level) / tier.slope;
@@ -450,7 +492,7 @@
       site.zoning.unspecifiedAdjacentSlantSlope, site.zoning.adjacentSlant25Designated);
     if (!params || edge.kind !== 'adjacent' || heightM <= 0) return 0;
     const [start, slope] = params;
-    const base = edge.wallSetbackM + relaxWidth(edge, ADJACENT_RELAX, true);
+    const base = edge.wallSetbackM + relaxWidth(edge, adjacentRelaxKinds(site), true);
     const level = levelRelax(edge);
     const h0 = start + slope * base + level;
     if (heightM <= h0) return 0;

@@ -325,3 +325,120 @@ def test_applies_is_answerable_without_the_designation():
         zoning=ZoningParams(zone_type="unspecified", far_ratio=3.0, coverage_ratio=0.6),
     )
     assert applies(site) is True
+
+
+# --- 令132条・令134条2項・令135条の2/3（V〜AA） ----------------------------
+
+from mvce.regulations import road_slant  # noqa: E402
+
+
+def _roads_site(specs, **kw):
+    return Site.from_rings(
+        [(0.0, 0.0), (30.0, 0.0), (30.0, 30.0), (0.0, 30.0)], specs,
+        zoning=ZoningParams(zone_type="1res", far_ratio=4.0, coverage_ratio=0.6), **kw)
+
+
+def test_three_frontages_are_undetermined():
+    """令132条2項の「これらの前面道路のみ」の扱いは運用が分かれる（食い違い W）。"""
+    site = _roads_site([
+        {"kind": "road", "road_width_m": 6.0}, {"kind": "road", "road_width_m": 4.0},
+        {"kind": "road", "road_width_m": 10.0}, {"kind": "adjacent"},
+    ])
+    with pytest.raises(UndeterminedRegulation):
+        road_slant.height_limit_at(site, (15.0, 15.0))
+
+
+def test_two_frontages_still_compute():
+    """2本なら2項の区域は空。1項か3項で決まるので計算できる。"""
+    site = _roads_site([
+        {"kind": "road", "road_width_m": 6.0}, {"kind": "road", "road_width_m": 10.0},
+        {"kind": "adjacent"}, {"kind": "adjacent"},
+    ])
+    assert road_slant.height_limit_at(site, (15.0, 15.0)) < float("inf")
+
+
+def test_article_134_2_is_off_by_default():
+    """条文は「よることができる」。選択規定なので既定では使わない。"""
+    specs = [
+        {"kind": "road", "road_width_m": 4.0,
+         "relaxation": {"kind": "park", "width_m": 12.0}},
+        {"kind": "road", "road_width_m": 6.0},
+        {"kind": "adjacent"}, {"kind": "adjacent"},
+    ]
+    off = road_slant.height_limit_at(_roads_site(specs), (28.0, 15.0))
+    on = road_slant.height_limit_at(
+        _roads_site(specs, apply_article_134_2=True), (28.0, 15.0))
+    assert on > off          # 選択すると緩む
+    assert off == pytest.approx(10.0)
+    assert on == pytest.approx(22.5)
+
+
+def test_article_134_2_carries_the_deemed_park_too():
+    """「その反対側に同様の公園等があるものとみなす」。幅員だけでなく公園も及ぶ。
+
+    公園の無い側の道路（東6m）でも、公園12mぶんの距離が乗る。
+    """
+    specs = [
+        {"kind": "road", "road_width_m": 4.0,
+         "relaxation": {"kind": "park", "width_m": 12.0}},
+        {"kind": "road", "road_width_m": 6.0},
+        {"kind": "adjacent"}, {"kind": "adjacent"},
+    ]
+    site = _roads_site(specs, apply_article_134_2=True)
+    d = road_slant.detail_at(site, (28.0, 15.0), 1)   # 東の道路
+    assert d.applied_width_m == pytest.approx(4.0)     # 公園側道路の幅員
+    assert d.relaxation_extra_m == pytest.approx(12.0)  # みなしの公園
+
+
+# --- 緩和対象の種別（食い違い AA） ------------------------------------------
+
+def _adjacent_site(kind, width=8.0, **kw):
+    return Site.from_rings(
+        [(0.0, 0.0), (20.0, 0.0), (20.0, 30.0), (0.0, 30.0)],
+        [{"kind": "road", "road_width_m": 6.0},
+         {"kind": "adjacent", "relaxation": {"kind": kind, "width_m": width}},
+         {"kind": "adjacent"}, {"kind": "adjacent"}],
+        zoning=ZoningParams(zone_type="1res", far_ratio=2.0, coverage_ratio=0.6), **kw)
+
+
+def test_adjacent_relaxation_follows_the_enumeration():
+    """令135条の3第1項1号: 公園（都市公園を除く）・広場・水面。線路敷は無い。"""
+    from mvce.regulations import adjacent_slant
+    base = adjacent_slant.edge_height_limit(_adjacent_site("none", 0.0), 1, (10.0, 15.0))
+    got = {k: adjacent_slant.edge_height_limit(_adjacent_site(k), 1, (10.0, 15.0))
+           for k in ("park", "urban_park", "water", "railway")}
+    assert got["park"] > base           # 公園は対象
+    assert got["water"] > base          # 水面は対象
+    assert got["urban_park"] == base    # 都市公園は明文で除外
+    assert got["railway"] == base       # 線路敷は列挙されていない
+
+
+def test_railway_can_be_opted_in_for_the_adjacent_slant():
+    from mvce.regulations import adjacent_slant
+    off = adjacent_slant.edge_height_limit(_adjacent_site("railway"), 1, (10.0, 15.0))
+    on = adjacent_slant.edge_height_limit(
+        _adjacent_site("railway", railway_is_adjacent_relaxation=True), 1, (10.0, 15.0))
+    assert on > off
+
+
+def test_urban_park_still_relaxes_the_road_slant():
+    """令134条には都市公園の除外が無い。道路斜線では対象のまま。"""
+    def road_limit(kind):
+        site = Site.from_rings(
+            [(0.0, 0.0), (20.0, 0.0), (20.0, 30.0), (0.0, 30.0)],
+            [{"kind": "road", "road_width_m": 6.0,
+              "relaxation": {"kind": kind, "width_m": 8.0}},
+             {"kind": "adjacent"}, {"kind": "adjacent"}, {"kind": "adjacent"}],
+            zoning=ZoningParams(zone_type="1res", far_ratio=4.0, coverage_ratio=0.6))
+        return road_slant.height_limit_at(site, (10.0, 2.0))
+    assert road_limit("urban_park") == road_limit("park")
+    assert road_limit("urban_park") > road_limit("none")
+
+
+def test_north_relaxation_excludes_parks():
+    """令135条の4は水面・線路敷のみ。公園・広場は列挙されていない。"""
+    from mvce.regulations import north_slant
+    from mvce.regulations.north_slant import NORTH_RELAXATION_KINDS
+    assert RelaxationKind.PARK not in NORTH_RELAXATION_KINDS
+    assert RelaxationKind.URBAN_PARK not in NORTH_RELAXATION_KINDS
+    assert NORTH_RELAXATION_KINDS == {RelaxationKind.WATER, RelaxationKind.RAILWAY}

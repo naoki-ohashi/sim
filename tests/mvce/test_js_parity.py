@@ -65,9 +65,14 @@ def _js_site(site):
             "zoneType": site.zoning.zone_type, "farRatio": site.zoning.far_ratio,
             "coverageRatio": site.zoning.coverage_ratio,
             "absoluteHeightLimitM": site.zoning.absolute_height_limit_m,
+            "unspecifiedRoadSlantSlope": site.zoning.unspecified_road_slant_slope,
+            "unspecifiedAdjacentSlantSlope": site.zoning.unspecified_adjacent_slant_slope,
+            "adjacentSlant25Designated": site.zoning.adjacent_slant_2_5_designated,
         },
         "northAngleDeg": site.north.north_angle_deg,
         "floorHeightM": site.floor_height_m,
+        "applyArticle1342": site.apply_article_134_2,
+        "railwayIsAdjacentRelaxation": site.railway_is_adjacent_relaxation,
     }
 
 

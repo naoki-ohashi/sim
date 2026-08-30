@@ -17,19 +17,76 @@
 
 ## 令132条の扱い
 
-条文（1項）は次の区域について「すべての前面道路が最大幅員の道路と同じ
-幅員を有するものとみなす」としています。
+条文は3項あります。
+
+**1項** — 次の2つの区域について「すべての前面道路が最大幅員の道路と同じ
+幅員を有するものとみなす」。
 
     (a) 幅員最大の前面道路の境界線から、その幅員の2倍以内 かつ 35m以内
     (b) その他の前面道路の中心線から10mを超える区域
 
-本モジュールは点ごとに (a) または (b) に該当するかを判定し、該当する場合は
-その点における各前面道路の幅員を最大幅員に読み替えて計算します。狭い道路に
-面していても、条件を満たす範囲では広い道路の斜線で判定できるため、実際に
-建てられる高さが上がります。
+条文が2つの区域を「及び」で並べているとおり、どちらかに該当すれば
+読み替えます。狭い道路に面していても、条件を満たす範囲では広い道路の
+斜線で判定できるので、建てられる高さが上がります。
 
-複雑な道路配置（3本以上で幅員がばらつく、屈曲した道路など）では行政庁の
-運用が分かれることがあります。判定内訳は `RoadSlantDetail` で確認できます。
+**2項** — 1項の区域外で、2以上の前面道路の境界線からそれぞれ幅員の2倍
+（幅員4m未満の道路は `10 − 幅員/2`）かつ35m以内の区域については、それらの
+道路のみを前面道路とし、幅員の小さいものを大きいものと同じ幅員とみなす。
+
+**3項** — 前2項の区域外は、その接する前面道路のみを前面道路とする。
+
+### 前面道路が2本のとき
+
+**2項の区域は空になります。** 2項は「1項の区域外」に限られますが、2本の
+場合、2項が要求する「両方の道路の2倍かつ35m以内」は 1項(a)（最大幅員道路の
+2倍かつ35m以内）を含んでしまうためです。したがって 1項に該当しなければ
+3項、つまり接する道路の幅員をそのまま使います。本モジュールはそう実装して
+います。
+
+### 令131条の2（前面道路とみなす道路等）は非対応
+
+土地区画整理地区の指定街区（1項）、計画道路・予定道路（2項）、壁面線・
+条例の壁面位置制限（3項）を前面道路とみなす規定です。**実装していません。**
+
+3つとも**特定行政庁の指定・認定が前提**で、MVCE が敷地情報だけから
+判定できるものではありません（原則H）。使う場合は、みなし後の道路を
+そのまま `Boundary` の前面道路として入力してください。そのほうが
+「行政庁の認定を受けた前提で検討している」ことが入力に残ります。
+
+なお2項は令135条の3第1項3号・令135条の4第1項3号（計画道路内の隣地
+境界線はないものとみなす）からも参照されており、そちらも非対応です。
+
+### 令134条2項（公園等がある道路を基準にする選択）
+
+前面道路が2以上あり、そのうちの1つの反対側に公園・広場・水面等がある
+場合、令132条1項によらず、**その道路を基準に全前面道路をみなす**ことが
+できます。
+
+    区域 = 公園等がある前面道路の境界線から
+           「公園等の反対側の境界線から当該前面道路の境界線までの距離」の2倍以内
+           かつ 35m以内
+           （及び その他の前面道路の中心線から10m超）
+
+この区域では、すべての前面道路が「公園等がある前面道路と同じ幅員を持ち、
+かつ反対側に同様の公園等がある」ものとみなされます。
+
+条文は「前項の規定に**よることができる**」で、**選択できる**規定です。
+使うかどうかは設計者の判断なので、`Site.apply_article_134_2` を明示的に
+`True` にしたときだけ適用します。既定は `False`（＝令132条1項による）で、
+そのほうが保守側です。
+
+### 前面道路が3本以上のとき
+
+**`UndeterminedRegulation` を返します。** 2項が実際に効くのはこの場合で、
+点ごとにどの道路の集合が「前面道路」になるかが変わります。さらに、集合に
+含まれない道路がその点で斜線を課すのかどうかは条文の文言だけでは決まらず、
+行政庁の運用が分かれます（基本設計書 5.3）。
+
+黙って2本用の式で計算するより、判断できないと言うほうが正確です。
+3本以上の敷地を扱う必要が出たら、審査機関プロファイル（原則A）として
+運用を持たせるのが筋です。
+
+判定内訳は `RoadSlantDetail` で確認できます。
 """
 from __future__ import annotations
 
@@ -38,17 +95,19 @@ from dataclasses import dataclass
 
 from ..geometry import Point, outward_normal, point_line_distance
 from ..site import Boundary, RelaxationKind, Site
-from ..zoning import road_slant_tier
+from ..zoning import UndeterminedRegulation, road_slant_tier
 
-# 令134条の緩和対象（道路斜線）: 公園・広場・水面
-ROAD_RELAXATION_KINDS = {RelaxationKind.PARK, RelaxationKind.WATER}
+# 令134条1項の緩和対象: 「公園、広場、水面その他これらに類するもの」。
+# 線路敷は列挙されていないので入れない。都市公園を除く規定も無いので、
+# 都市公園は対象に入る（隣地＝令135条の3 とはここが違う）。
+ROAD_RELAXATION_KINDS = {
+    RelaxationKind.PARK, RelaxationKind.URBAN_PARK, RelaxationKind.WATER,
+}
 
-# 令132条1項の定数。
-# ⚠ 2項・3項は未実装で、前面道路が3本以上でも2本用の式で計算します
-# （食い違い W）。基本設計書 5.3 は 3本以上を UNDETERMINED としています。
-MULTI_ROAD_WIDTH_FACTOR = 2.0     # 最大幅員の2倍以内
-MULTI_ROAD_MAX_DISTANCE_M = 35.0  # かつ35m以内
-MULTI_ROAD_CENTERLINE_M = 10.0    # 他の道路の中心線から10m超
+# 令132条の定数
+MULTI_ROAD_WIDTH_FACTOR = 2.0     # 1項(a): 最大幅員の2倍以内
+MULTI_ROAD_MAX_DISTANCE_M = 35.0  # 1項(a)・2項: かつ35m以内
+MULTI_ROAD_CENTERLINE_M = 10.0    # 1項(b): 他の道路の中心線から10m超
 
 
 @dataclass
@@ -69,29 +128,23 @@ class RoadSlantDetail:
 
 
 def _level_relaxation(edge: Boundary) -> float:
-    """令135条の2: 道路面と敷地の地盤面に高低差がある場合の緩和。
-
-    ⚠ **向きが条文と逆です**（`docs/mvce/legal_basis.md` の食い違い V）。
+    """令135条の2: 敷地の地盤面が前面道路より1m以上高い場合の緩和。
 
         第百三十五条の二　建築物の敷地の地盤面が前面道路より一メートル以上
-        【高い】場合においては、その前面道路は、敷地の地盤面と前面道路との
+        高い場合においては、その前面道路は、敷地の地盤面と前面道路との
         高低差から一メートルを減じたものの二分の一だけ高い位置にあるものと
         みなす。
 
-    条文は敷地が道路より**高い**ときの緩和ですが、`ground_level_diff_m` は
-    「正の値で敷地の方が**低い**」と定義されており、ここはその向きで
-    判定しています。隣地（令135条の3第1項2号）と北側（令135条の4第1項2号）
-    は条文が「低い」なのでフィールドの定義と合っていますが、道路だけ
-    合っていません。
+    道路を高い位置にあるものとみなすので、そのぶん敷地側の許容高さが
+    上がります。
 
-    結果として、敷地が道路より低いとき条文にない緩和が付きます（危険側）。
-    逆に敷地が道路より高いときは本来の緩和が得られません。
-
-    直すには1つのフィールドで3つの緩和をまかなうのをやめる必要があり、
-    入力の互換性が壊れるので保留しています。
+    **隣地（令135条の3第1項2号）・北側（令135条の4第1項2号）とは向きが
+    逆です。** あちらは敷地が隣地より「低い」ときに効きます。
+    `ground_level_diff_m` は「外側が敷地より何m高いか」の符号つきなので、
+    道路ではその符号を反転して見ます。
     """
-    h = edge.ground_level_diff_m
-    return (h - 1.0) / 2.0 if h >= 1.0 else 0.0
+    rise = -edge.ground_level_diff_m   # 敷地が道路よりどれだけ高いか
+    return (rise - 1.0) / 2.0 if rise >= 1.0 else 0.0
 
 
 def _relaxation_extra(edge: Boundary) -> float:
@@ -102,30 +155,88 @@ def _relaxation_extra(edge: Boundary) -> float:
     return 0.0
 
 
+def article_134_2_span(site: Site, point: Point) -> tuple[float, float] | None:
+    """令134条2項を選択したときの、その点での (みなし幅員, みなし公園等の幅)。
+
+    適用外なら None。条文は「すべての前面道路を当該公園等がある前面道路と
+    同じ幅員を有し、**かつ、その反対側に同様の公園等があるもの**とみなす」
+    としているので、幅員だけでなく公園等の幅も全前面道路に及びます。
+    だから2つ返します。
+    """
+    if not site.apply_article_134_2:
+        return None
+    roads = site.road_edges
+    if len(roads) < 2:
+        return None
+    with_park = [r for r in roads
+                 if r.relaxation.active and r.relaxation.kind in ROAD_RELAXATION_KINDS]
+    if not with_park:
+        return None
+
+    best: tuple[float, float] | None = None
+    for base in with_park:
+        # 公園等の反対側の境界線から当該前面道路の境界線までの水平距離
+        span = base.road_width_m + base.relaxation.width_m
+        d_base = point_line_distance(point, base.p1, base.p2)
+        in_a = (d_base <= MULTI_ROAD_WIDTH_FACTOR * span + 1e-9
+                and d_base <= MULTI_ROAD_MAX_DISTANCE_M + 1e-9)
+        others = [r for r in roads if r is not base]
+        in_b = all(
+            point_line_distance(point, r.p1, r.p2) + r.road_width_m / 2.0
+            > MULTI_ROAD_CENTERLINE_M + 1e-9
+            for r in others
+        )
+        if not (in_a or in_b):
+            continue
+        # 「よることができる」選択規定なので、複数の候補があれば
+        # 設計者に有利な（＝反対側境界線が遠い）ものを採る。
+        if best is None or span > best[0] + best[1]:
+            best = (base.road_width_m, base.relaxation.width_m)
+    return best
+
+
 def applied_width_at(site: Site, point: Point, edge: Boundary) -> tuple[float, bool]:
     """令132条を適用した後の、その点における `edge` の幅員。
 
     戻り値は (適用幅員, 読み替えが起きたか)。
+
+    前面道路が3本以上ある敷地では `UndeterminedRegulation` を送出します
+    （モジュール冒頭「前面道路が3本以上のとき」参照）。
     """
     roads = site.road_edges
     max_width = site.max_road_width_m
+
+    if len(roads) >= 3:
+        raise UndeterminedRegulation(
+            f"前面道路が{len(roads)}本あります。令132条2項は、1項の区域外で"
+            f"2以上の道路の2倍かつ35m以内に入る区域について「これらの前面道路"
+            f"のみを前面道路とする」と定めますが、その集合に入らない道路が"
+            f"その点で斜線を課すかどうかは条文からは決まらず、行政庁の運用が"
+            f"分かれます。2本用の式で近似すると誤った結果になるため計算を"
+            f"止めます（基本設計書 5.3）"
+        )
+
     if len(roads) < 2 or edge.road_width_m >= max_width:
+        # 1本だけ、または自分が最大幅員。読み替えの余地なし。
         return edge.road_width_m, False
 
     widest = max(roads, key=lambda e: e.road_width_m)
 
-    # (a) 最大幅員道路の境界線から 2A 以内 かつ 35m 以内
+    # 1項(a) 最大幅員道路の境界線から 2A 以内 かつ 35m 以内
     d_widest = point_line_distance(point, widest.p1, widest.p2)
     in_a = (d_widest <= MULTI_ROAD_WIDTH_FACTOR * max_width + 1e-9
             and d_widest <= MULTI_ROAD_MAX_DISTANCE_M + 1e-9)
 
-    # (b) この道路の中心線から 10m を超える
-    #     中心線は道路境界線から幅員の半分だけ敷地の外側にある
+    # 1項(b) その他の前面道路の中心線から 10m を超える。
+    #        道路が2本なら「その他」は edge だけ。
+    #        中心線は道路境界線から幅員の半分だけ敷地の外側にある。
     d_centerline = point_line_distance(point, edge.p1, edge.p2) + edge.road_width_m / 2.0
     in_b = d_centerline > MULTI_ROAD_CENTERLINE_M + 1e-9
 
     if in_a or in_b:
         return max_width, True
+
+    # 2項の区域は2本のとき空（モジュール冒頭参照）。よって3項。
     return edge.road_width_m, False
 
 
@@ -136,9 +247,16 @@ def detail_at(site: Site, point: Point, edge_index: int) -> RoadSlantDetail:
 
     tier = road_slant_tier(site.zoning.zone_type, site.zoning.far_ratio,
                            site.zoning.unspecified_road_slant_slope)
-    applied_width, widened = applied_width_at(site, point, edge)
+    span = article_134_2_span(site, point)
+    if span is not None:
+        # 令134条2項を選択。全前面道路が公園等のある道路と同じ幅員を持ち、
+        # 反対側に同様の公園等があるものとみなす。
+        applied_width, extra = span
+        widened = applied_width > edge.road_width_m
+    else:
+        applied_width, widened = applied_width_at(site, point, edge)
+        extra = _relaxation_extra(edge)
     s = point_line_distance(point, edge.p1, edge.p2)
-    extra = _relaxation_extra(edge)
     level = _level_relaxation(edge)
 
     # L = 敷地内の距離 + 道路幅員 + 後退距離 + 公園等の幅

@@ -28,21 +28,29 @@ from ..zoning import adjacent_slant_item, adjacent_slant_params
 
 # 令135条の3第1項1号の緩和対象: 公園・広場・水面・線路敷
 # 令135条の3第1項第1号が列挙するのは
-# 「公園（都市公園法施行令2条1項1号の都市公園を除く）、広場、水面
+# 「公園（都市公園法施行令2条1項1号に規定する都市公園を除く）、広場、水面
 #   その他これらに類するもの」。
 #
-# ⚠ **線路敷は列挙されていません**（食い違い AA）。北側（令135条の4）と
-# 日影（令135条の12）は線路敷を明示しているのに、隣地と道路は挙げて
-# いません。ここに入れているのは「その他これらに類するもの」に当たると
-# いう解釈で、緩い側です。
-# ⚠ **都市公園の除外も未実装**です。入力に都市公園かどうかの区別が要ります。
-ADJACENT_RELAXATION_KINDS = {RelaxationKind.PARK, RelaxationKind.WATER, RelaxationKind.RAILWAY}
+# **線路敷は列挙されていません。** 北側（令135条の4）と日影（令135条の12）は
+# 線路敷を明示しているのに、隣地と道路は挙げていない。書き分けられていると
+# 読むのが素直なので、条文どおり外してあります。
+#
+# **都市公園も明文で除かれます。** `RelaxationKind.URBAN_PARK` として
+# 種類を分けているので、ここに入れないだけで除外できます。
+#
+# 線路敷を「その他これらに類するもの」に含める運用の行政庁もあるので、
+# `Site.railway_is_adjacent_relaxation` で明示的に有効にできます
+# （原則A: 方式差はコードの if ではなく設定で持つ）。
+ADJACENT_RELAXATION_KINDS = {RelaxationKind.PARK, RelaxationKind.WATER}
 
 
-def _relaxation_extra(edge: Boundary) -> float:
+def _relaxation_extra(edge: Boundary, site: Site | None = None) -> float:
     """公園・水面等の幅の 1/2（令135条の3第1項1号）。"""
+    kinds = set(ADJACENT_RELAXATION_KINDS)
+    if site is not None and site.railway_is_adjacent_relaxation:
+        kinds.add(RelaxationKind.RAILWAY)
     relax = edge.relaxation
-    if relax.active and relax.kind in ADJACENT_RELAXATION_KINDS:
+    if relax.active and relax.kind in kinds:
         return relax.width_m / 2.0
     return 0.0
 
@@ -74,7 +82,7 @@ def edge_height_limit(site: Site, edge_index: int, point: Point) -> float:
         return math.inf
     start_height, slope = params
     L = (point_line_distance(point, edge.p1, edge.p2)
-         + edge.wall_setback_m + _relaxation_extra(edge))
+         + edge.wall_setback_m + _relaxation_extra(edge, site))
     return start_height + slope * L + _level_relaxation(edge)
 
 
@@ -101,7 +109,7 @@ def required_setback_for_height(site: Site, edge_index: int, height_m: float) ->
     if params is None or edge.kind.value != "adjacent" or height_m <= 0:
         return 0.0
     start_height, slope = params
-    base = edge.wall_setback_m + _relaxation_extra(edge)
+    base = edge.wall_setback_m + _relaxation_extra(edge, site)
     h0 = start_height + slope * base + _level_relaxation(edge)
     if height_m <= h0:
         return 0.0

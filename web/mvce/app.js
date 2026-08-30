@@ -72,9 +72,9 @@
         <div class="row relax-only"><label>その幅</label>
           <input type="number" data-f="relaxWidth" value="${prev.relaxWidth != null ? prev.relaxWidth : 4}"
                  min="0.5" step="0.5" style="width:80px"><span class="unit">m</span></div>
-        <div class="row"><label>敷地が低い高低差</label>
+        <div class="row"><label title="正なら外側（路面・隣地）が高い＝敷地が低い。負なら敷地が高い。道路斜線の緩和（令135条の2）は敷地が高いとき、隣地・北側（令135条の3/4）は敷地が低いときに効きます">高低差（正=敷地が低い）</label>
           <input type="number" data-f="levelDiff" value="${prev.levelDiff != null ? prev.levelDiff : 0}"
-                 min="0" step="0.5" style="width:80px"><span class="unit">m</span></div>
+                 step="0.5" style="width:80px"><span class="unit">m</span></div>
       `;
       container.appendChild(div);
       div.querySelectorAll('select, input').forEach(el => {
@@ -442,7 +442,8 @@
       out.push(`    - kind: ${e.kind}`);
       if (e.kind === 'road') out.push(`      road_width_m: ${e.roadWidthM}`);
       out.push(`      wall_setback_m: ${e.wallSetbackM}`);
-      if (e.groundLevelDiffM > 0) out.push(`      ground_level_diff_m: ${e.groundLevelDiffM}`);
+      // 符号つき。負なら敷地が外側より高い（道路斜線の緩和はこちら向き）
+      if (e.groundLevelDiffM) out.push(`      ground_level_diff_m: ${e.groundLevelDiffM}`);
       if (e.relaxation.kind !== 'none') {
         out.push('      relaxation:', `        kind: ${e.relaxation.kind}`,
                  `        width_m: ${e.relaxation.widthM}`);
@@ -551,7 +552,7 @@
       if (rk) get('relaxKind').value = rk[1];
       const rwid = block.match(/width_m:\s*([\d.]+)/);
       if (rwid) get('relaxWidth').value = rwid[1];
-      const ld = block.match(/ground_level_diff_m:\s*([\d.]+)/);
+      const ld = block.match(/ground_level_diff_m:\s*(-?[\d.]+)/);
       if (ld) get('levelDiff').value = ld[1];
       updateEdgeVisibility(div);
     });

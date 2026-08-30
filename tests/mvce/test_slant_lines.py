@@ -76,23 +76,52 @@ def test_road_slant_park_relaxation_adds_full_width():
     assert road_slant.height_limit_at(site, (15.0, 0.0)) == pytest.approx(20.0)
 
 
-def test_road_slant_level_difference_relaxation():
-    """令135条の2: 地盤面が道路より1m以上低い場合 (h-1)/2 だけ緩和。"""
-    specs = [
-        {"kind": "road", "road_width_m": 6.0, "ground_level_diff_m": 3.0},
+def _road_site(level_diff: float):
+    return _site(specs=[
+        {"kind": "road", "road_width_m": 6.0, "ground_level_diff_m": level_diff},
         {"kind": "adjacent"}, {"kind": "adjacent"}, {"kind": "adjacent"},
-    ]
-    site = _site(specs=specs)
-    # 7.5 + (3-1)/2 = 8.5
-    assert road_slant.height_limit_at(site, (15.0, 0.0)) == pytest.approx(8.5)
+    ])
+
+
+def test_road_slant_level_difference_relaxation():
+    """令135条の2: 敷地が道路より1m以上**高い**場合に (h-1)/2 だけ緩和。
+
+    `ground_level_diff_m` は「外側が敷地より何m高いか」なので、敷地が
+    3m高いなら -3.0。7.5 + (3-1)/2 = 8.5。
+    """
+    assert road_slant.height_limit_at(_road_site(-3.0), (15.0, 0.0)) == pytest.approx(8.5)
 
 
 def test_road_slant_level_difference_under_one_metre_has_no_effect():
-    specs = [
-        {"kind": "road", "road_width_m": 6.0, "ground_level_diff_m": 0.8},
-        {"kind": "adjacent"}, {"kind": "adjacent"}, {"kind": "adjacent"},
-    ]
-    assert road_slant.height_limit_at(_site(specs=specs), (15.0, 0.0)) == pytest.approx(7.5)
+    assert road_slant.height_limit_at(_road_site(-0.8), (15.0, 0.0)) == pytest.approx(7.5)
+
+
+def test_road_slant_gives_nothing_when_the_site_is_lower():
+    """条文は敷地が「高い」ときの緩和。低いときは緩和しない。
+
+    ここが逆になっていたのが食い違い V。敷地が3m低いとき、以前は
+    +1.0m の緩和が付いていた。
+    """
+    assert road_slant.height_limit_at(_road_site(3.0), (15.0, 0.0)) == pytest.approx(7.5)
+    assert road_slant.height_limit_at(_road_site(0.0), (15.0, 0.0)) == pytest.approx(7.5)
+
+
+def test_adjacent_and_north_relax_in_the_opposite_direction():
+    """隣地・北側は敷地が「低い」とき。道路と向きが逆であることを固定する。"""
+    from mvce.regulations import adjacent_slant, north_slant
+    lower = _site(specs=[
+        {"kind": "road", "road_width_m": 6.0},
+        {"kind": "adjacent", "ground_level_diff_m": 3.0},
+        {"kind": "adjacent"}, {"kind": "adjacent"},
+    ])
+    higher = _site(specs=[
+        {"kind": "road", "road_width_m": 6.0},
+        {"kind": "adjacent", "ground_level_diff_m": -3.0},
+        {"kind": "adjacent"}, {"kind": "adjacent"},
+    ])
+    # 敷地が低い側でだけ緩和が乗る
+    assert (adjacent_slant.edge_height_limit(lower, 1, (10.0, 15.0))
+            - adjacent_slant.edge_height_limit(higher, 1, (10.0, 15.0))) == pytest.approx(1.0)
 
 
 # === 令132条: 2以上の前面道路 =========================================

@@ -142,8 +142,12 @@ def _build_site(data: dict) -> tuple[Site, list[str]]:
         spec.setdefault("wall_setback_m", default_setback)
         normalized.append(spec)
 
-    site = Site.from_rings(points, normalized, zoning, north=north,
-                           floor_height_m=floor_height, name=data.get("name", ""))
+    site = Site.from_rings(
+        points, normalized, zoning, north=north,
+        floor_height_m=floor_height, name=data.get("name", ""),
+        apply_article_134_2=data.get("apply_article_134_2", False),
+        railway_is_adjacent_relaxation=data.get("railway_is_adjacent_relaxation", False),
+    )
     return site, notes
 
 
