@@ -208,6 +208,10 @@ class OptimizeResult:
                 f"（Ps {sky.worst_ps:.2f}% ≧ Pr {sky.worst_pr:.2f}%）"
             )
         lines.extend(self.far.notes)
+        if site.height_district is not None:
+            from ..regulations.height_district import compliance_notes
+
+            lines.extend(compliance_notes(site, self.max_height_m))
         lines.extend(self.notes)
         return lines
 

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from ..geometry import Point, offset_polygon_by_edge_distances, polygon_to_ring
 from ..site import Site
 from ..zone_split import require_single_zone_type
-from . import adjacent_slant, north_slant, road_slant
+from . import adjacent_slant, height_district, north_slant, road_slant
 
 
 @dataclass
@@ -23,8 +23,10 @@ class HeightBreakdown:
     adjacent_m: float
     north_m: float
     absolute_m: float
+    height_district_m: float
     limit_m: float
-    governing: str  # "road" | "adjacent" | "north" | "absolute" | "none"
+    # "road" | "adjacent" | "north" | "absolute" | "height_district" | "none"
+    governing: str
 
 
 def breakdown_at(site: Site, point: Point) -> HeightBreakdown:
@@ -34,13 +36,15 @@ def breakdown_at(site: Site, point: Point) -> HeightBreakdown:
     north = north_slant.height_limit_at(site, point)
     absolute = (site.zoning.absolute_height_limit_m
                 if site.zoning.absolute_height_limit_m is not None else math.inf)
+    district = height_district.height_limit_at(site, point)
 
-    candidates = {"road": road, "adjacent": adjacent, "north": north, "absolute": absolute}
+    candidates = {"road": road, "adjacent": adjacent, "north": north,
+                  "absolute": absolute, "height_district": district}
     governing = min(candidates, key=lambda k: candidates[k])
     limit = candidates[governing]
     if math.isinf(limit):
         governing = "none"
-    return HeightBreakdown(road, adjacent, north, absolute, limit, governing)
+    return HeightBreakdown(road, adjacent, north, absolute, district, limit, governing)
 
 
 def height_limit_at(site: Site, point: Point, use_sky_ratio: bool = False) -> float:
@@ -52,8 +56,11 @@ def height_limit_at(site: Site, point: Point, use_sky_ratio: bool = False) -> fl
     """
     if use_sky_ratio:
         require_single_zone_type(site.zone_split, "絶対高さ制限（法55条）")
-        return (site.zoning.absolute_height_limit_m
-                if site.zoning.absolute_height_limit_m is not None else math.inf)
+        absolute = (site.zoning.absolute_height_limit_m
+                    if site.zoning.absolute_height_limit_m is not None else math.inf)
+        # 法56条7項が適用除外にするのは法56条1項1号〜3号だけ。法55条の
+        # 絶対高さ制限も法58条の高度地区も天空率では外れない。
+        return min(absolute, height_district.height_limit_at(site, point))
     return breakdown_at(site, point).limit_m
 
 
@@ -61,14 +68,21 @@ def required_setback_for_height(site: Site, edge_index: int, height_m: float) ->
     """辺 `edge_index` について、高さ `height_m` に必要な後退距離。"""
     require_single_zone_type(site.zone_split, "斜線制限（法56条）")
     edge = site.edges[edge_index]
+    # 高度地区（法58条）は北側境界線について効く。天空率でも外れない。
+    district_needed = 0.0
+    if edge_index in north_slant.north_edges(site):
+        district_needed = height_district.required_setback_for_height(
+            site, edge_index, height_m)
+
     if edge.is_road:
-        return road_slant.required_setback_for_height(site, edge_index, height_m)
+        return max(district_needed,
+                   road_slant.required_setback_for_height(site, edge_index, height_m))
     if edge.kind.value == "adjacent":
         needed = adjacent_slant.required_setback_for_height(site, edge_index, height_m)
         if edge_index in north_slant.north_edges(site):
             needed = max(needed, north_slant.required_setback_for_height(site, edge_index, height_m))
-        return needed
-    return 0.0
+        return max(needed, district_needed)
+    return district_needed
 
 
 def buildable_ring_at_height(site: Site, height_m: float) -> list[Point] | None:
@@ -91,6 +105,11 @@ def max_relevant_height(site: Site) -> float:
     最大値に余裕を見た値を使います。
     """
     require_single_zone_type(site.zone_split, "絶対高さ制限（法55条）")
+    district = site.height_district
+    if district is not None and district.max_height_m is not None:
+        if site.zoning.absolute_height_limit_m is not None:
+            return min(site.zoning.absolute_height_limit_m, district.max_height_m)
+        return district.max_height_m
     if site.zoning.absolute_height_limit_m is not None:
         return site.zoning.absolute_height_limit_m
     cx = sum(p[0] for p in site.points) / len(site.points)

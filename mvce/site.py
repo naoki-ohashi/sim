@@ -16,13 +16,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
-from typing import Optional, Sequence
+from typing import TYPE_CHECKING, Optional, Sequence
 
 from .crs import CrsContext
 from .geometry import Point, dedupe_ring, polygon_area, polygon_signed_area
 from .north import NorthReference
 from .zone_split import ZoneSplit
 from .zoning import ZoningParams
+
+if TYPE_CHECKING:   # 循環参照を避ける（height_district が site を読む）
+    from .regulations.height_district import HeightDistrict
 
 
 class BoundaryKind(str, Enum):
@@ -263,6 +266,10 @@ class Site:
     #: 既定の False は令132条1項によるということで、保守側です。
     apply_article_134_2: bool = False
 
+    #: 高度地区（法58条）。内容は都市計画で決まるので、すべて入力です。
+    #: **天空率（法56条7項）では緩和されません。**
+    height_district: Optional["HeightDistrict"] = None
+
     #: 日影規制の高低差緩和（令135条の12第3項第2号・第4項）。
     #: 既定は緩和なし。斜線の高低差緩和とは別の条文です。
     shadow_ground: ShadowGroundRelaxation = field(default_factory=ShadowGroundRelaxation)
@@ -407,6 +414,7 @@ class Site:
         ground_levels: Optional[Sequence[float]] = None,
         zone_split: Optional[ZoneSplit] = None,
         shadow_ground: Optional[ShadowGroundRelaxation] = None,
+        height_district: Optional["HeightDistrict"] = None,
     ) -> "Site":
         """頂点列と辺の設定（dict）から Site を作る。
 
@@ -459,6 +467,7 @@ class Site:
             ground_levels=tuple(levels) if levels is not None else None,
             zone_split=zone_split,
             shadow_ground=shadow_ground or ShadowGroundRelaxation(),
+            height_district=height_district,
         )
 
 

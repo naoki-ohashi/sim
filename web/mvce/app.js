@@ -518,6 +518,12 @@
         + 'ブラウザ版は令2条2項の平均地盤面に対応していないので、'
         + 'Python 版（mvce コマンド）を使ってください。');
     }
+    if (/^\s*height_district:/m.test(text)) {
+      throw new Error(
+        'この設定は高度地区（height_district、法58条）を持っています。'
+        + 'ブラウザ版は未対応で、読み込むと高度地区を無視した過大な結果に'
+        + 'なります。Python 版（mvce コマンド）を使ってください。');
+    }
     if (/^\s*shadow_ground:/m.test(text)) {
       throw new Error(
         'この設定は日影の高低差緩和（shadow_ground、令135条の12第3項第2号）を'

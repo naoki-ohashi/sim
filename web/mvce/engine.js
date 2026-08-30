@@ -12,6 +12,7 @@
  *   - 令2条2項の平均地盤面（mvce/ground.py）
  *   - 法52条7項・法53条2項の按分（mvce/zone_split.py）
  *   - 令135条の12第3項第2号の日影の高低差緩和
+ *   - 高度地区（法58条。mvce/regulations/height_district.py）
  * これらを含む YAML は app.js が読み込みを拒否します（黙って無視すると
  * 数字が間違うため）。測定面のZは常に spec.measurementHeightM です。
  *   mvce/regulations/*.py    → heightLimitAt ほか（斜線制限と緩和）

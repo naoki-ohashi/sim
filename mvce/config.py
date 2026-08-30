@@ -23,6 +23,7 @@ from .io.site_json import read_site_plan_json
 from .north import NorthReference
 from .solvers.optimizer import OptimizeOptions
 from .regulations.shadow import ShadowRegulationSpec
+from .regulations.height_district import HeightDistrict, HeightDistrictTier
 from .site import ShadowGroundRelaxation, Site
 from .zone_split import ZonePart, ZoneSplit
 from .zoning import ZoningParams, validate_measurement_height
@@ -171,8 +172,36 @@ def _build_site(data: dict) -> tuple[Site, list[str]]:
         ground_levels=data.get("ground_levels"),
         zone_split=_build_zone_split(data.get("zone_split")),
         shadow_ground=_build_shadow_ground(data.get("shadow_ground")),
+        height_district=_build_height_district(data.get("height_district")),
     )
     return site, notes
+
+
+def _build_height_district(data: dict | None) -> "HeightDistrict | None":
+    """`height_district:` から法58条の内容を作る。
+
+    数値はすべて都市計画からの転記です。既定値は置きません（原則G）。
+    """
+    if not data:
+        return None
+    tiers = tuple(
+        HeightDistrictTier(
+            start_height_m=float(t["start_height_m"]),
+            slope=float(t["slope"]),
+            from_distance_m=float(t.get("from_distance_m", 0.0)),
+            to_distance_m=(None if t.get("to_distance_m") is None
+                           else float(t["to_distance_m"])),
+        )
+        for t in data.get("north_tiers", [])
+    )
+    return HeightDistrict(
+        north_tiers=tiers,
+        include_road_width=data.get("include_road_width"),
+        name=data.get("name", ""),
+        max_height_m=data.get("max_height_m"),
+        min_height_m=data.get("min_height_m"),
+        setback_relaxation_m=float(data.get("setback_relaxation_m", 0.0)),
+    )
 
 
 def _build_shadow_ground(data: dict | None) -> ShadowGroundRelaxation | None:
