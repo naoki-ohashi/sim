@@ -345,7 +345,7 @@ DXFには棟の位置が `MVCE-RIDGE` レイヤに描かれます。
 ```yaml
 mesh:
   use_sky_ratio: true
-  sky_ratio_interval_m: 4.0   # 測定点の間隔(m)
+  # sky_ratio_interval_m: 1.0 # 測定点の間隔(m)。既定は条文の間隔（令135条の9〜11）
   sky_ratio_n_azimuth: 72     # 天空を何方位で刻むか
 ```
 
@@ -542,7 +542,6 @@ mesh:
   mesh_angle_deg: 0                # メッシュを回転させたい場合
   coverage_threshold: 0.5          # マスの何割が外郭線に入っていれば採用するか
   use_sky_ratio: false             # true で斜線制限の代わりに天空率判定
-  sky_ratio_interval_m: 4.0
   sky_ratio_n_azimuth: 72
   envelope_family: voxel           # voxel / lean_to / ridge（4.9節）
   roof_angle_span_deg: 15.0        # 棟の向きを探索する範囲（±この角度）

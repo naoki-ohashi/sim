@@ -181,7 +181,8 @@
   const meshOptions = () => ({
     cellSizeXM: +$('cell-x').value, cellSizeYM: +$('cell-y').value, coverageThreshold: 0.5,
     useSkyRatio: $('sky-on').checked,
-    skyRatioIntervalM: +$('sky-interval').value || 4.0,
+    // 空欄なら条文の間隔（令135条の9〜11）。入れるとそこまで細かくできる
+    skyRatioIntervalM: +$('sky-interval').value || null,
     skyRatioNAzimuth: +$('sky-n-azimuth').value || 72,
   });
 

@@ -241,7 +241,7 @@ def _build_options(data: dict | None) -> OptimizeOptions:
         coverage_threshold=data.get("coverage_threshold", 0.5),
         use_sky_ratio=data.get("use_sky_ratio", False),
         max_iterations=data.get("max_iterations", 4000),
-        sky_ratio_interval_m=data.get("sky_ratio_interval_m", 4.0),
+        sky_ratio_interval_m=data.get("sky_ratio_interval_m"),
         sky_ratio_n_azimuth=data.get("sky_ratio_n_azimuth", 72),
         envelope_family=data.get("envelope_family", "voxel"),
         roof_angle_span_deg=data.get("roof_angle_span_deg", 15.0),

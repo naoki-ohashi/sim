@@ -80,8 +80,8 @@ if (input.want.includes('sky')) {
   const azimuthOffsetRatio = input.skyAzimuthOffsetRatio != null ? input.skyAzimuthOffsetRatio : 0.5;
   out.sky = {
     azimuths: E.azimuthsDeg(nAzimuth, azimuthOffsetRatio),
-    measurementPoints: E.skyMeasurementPoints(site, input.skyIntervalM || 2.0)
-      .map(s => ({ point: s.point, kind: s.kind, edgeIndex: s.edgeIndex })),
+    measurementPoints: E.skyMeasurementPoints(site, input.skyMaxIntervalM)
+      .map(s => ({ point: s.point, z: s.z, kind: s.kind, edgeIndex: s.edgeIndex })),
     referenceLayerCount: E.referenceBuilding(site, input.skyNLayers || 20).length,
     requiredSetbacks: (input.skySetbackCases || []).map(c =>
       E.requiredSetbackForHeight(site, c.edgeIndex, c.heightM)),

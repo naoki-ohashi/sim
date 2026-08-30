@@ -360,15 +360,41 @@ def test_azimuths_match():
     assert js["azimuths"] == pytest.approx(azimuths_deg(72, 0.5))
 
 
-def test_sky_measurement_points_match():
+@pytest.mark.parametrize("cap", [None, 3.0])
+def test_sky_measurement_points_match(cap):
+    """算定位置（令135条の9・10・11）が Python 版と一致する。
+
+    位置だけでなく**想定半球の中心の高さ**も比べます。道路は路面の中心、
+    隣地・北側は敷地の地盤面で、位置ごとに違うためです。
+    """
     site = _site(_ASYMMETRIC_SPECS, far=4.0)
-    js = _run_js({"want": ["sky"], "site": _js_site(site), "skyIntervalM": 3.0})["sky"]
-    py = measurement_points(site, 3.0)
+    js = _run_js({"want": ["sky"], "site": _js_site(site),
+                  "skyMaxIntervalM": cap})["sky"]
+    py = measurement_points(site, cap)
     assert len(js["measurementPoints"]) == len(py)
-    for jp, (p, kind, edge_index) in zip(js["measurementPoints"], py):
-        assert jp["point"] == pytest.approx(list(p), abs=1e-9)
-        assert jp["kind"] == kind
-        assert jp["edgeIndex"] == edge_index
+    for jp, position in zip(js["measurementPoints"], py):
+        assert jp["point"] == pytest.approx(list(position.point), abs=1e-9)
+        assert jp["z"] == pytest.approx(position.z_m, abs=1e-12)
+        assert jp["kind"] == position.kind
+        assert jp["edgeIndex"] == position.edge_index
+
+
+def test_sky_measurement_points_follow_the_statutory_intervals():
+    """条文の間隔が JS 側にも入っていること。
+
+    低層住専の北側は1m以内（令135条の11第1項2号）。ここを2mにすると
+    測定点の間をすり抜けるので、粗さの取り違えを固定します。
+    """
+    specs = [{"kind": "road", "road_width_m": 6.0}, {"kind": "adjacent"},
+             {"kind": "adjacent"}, {"kind": "adjacent"}]
+    site = _site(specs, zone="1low", far=0.8, coverage=0.5)
+    js = _run_js({"want": ["sky"], "site": _js_site(site)})["sky"]
+    north = [p for p in js["measurementPoints"] if p["kind"] == "north"]
+    # 北辺は 30m。1m以内の間隔で均等 → 両端を含めて31点
+    assert len(north) == 31
+    road = [p for p in js["measurementPoints"] if p["kind"] == "road"]
+    # 道路は幅員6mの1/2＝3m以内。30m の辺なら 11点
+    assert len(road) == 11
 
 
 def test_reference_building_layer_count_matches():

@@ -15,7 +15,6 @@ from mvce.index.sky_index import AZIMUTH_OFFSET_RATIO, build_sky_index, summariz
 from mvce.zoning import ZoningParams
 
 CELL = 3.0
-INTERVAL = 4.0
 N_AZIMUTH = 72
 
 
@@ -33,14 +32,14 @@ def _site(setback=0.0, far=2.0, zone="1res", road=6.0, coverage=0.6, height=None
 
 def _options(**kwargs):
     base = dict(cell_size_x_m=CELL, cell_size_y_m=CELL,
-                sky_ratio_interval_m=INTERVAL, sky_ratio_n_azimuth=N_AZIMUTH)
+                sky_ratio_n_azimuth=N_AZIMUTH)
     base.update(kwargs)
     return OptimizeOptions(**base)
 
 
 def _independent_check(site, blocks):
     """インデックスを使わず、shapely 版で Ps ≧ Pr を確かめ直す。"""
-    return sky_ratio.check(site, blocks, interval_m=INTERVAL, n_azimuth=N_AZIMUTH,
+    return sky_ratio.check(site, blocks, n_azimuth=N_AZIMUTH,
                            azimuth_offset_ratio=AZIMUTH_OFFSET_RATIO)
 
 
@@ -59,7 +58,7 @@ def test_index_matches_the_polygon_based_calculation(cell):
     heights = floors * site.floor_height_m
     blocks = _floors_to_blocks(area, floors, site.floor_height_m)
 
-    index = build_sky_index(site, area, interval_m=INTERVAL, n_azimuth=N_AZIMUTH)
+    index = build_sky_index(site, area, n_azimuth=N_AZIMUTH)
     for i, point in enumerate(index.points):
         expected = sky_ratio.sky_ratio_percent(
             (point[0], point[1], 0.0), blocks, N_AZIMUTH, AZIMUTH_OFFSET_RATIO)
@@ -76,7 +75,7 @@ def test_lowering_a_cell_never_decreases_sky_ratio():
     assign_height_limits(area)
     floors = np.array([c.max_floors for c in area.cells], dtype=int)
     heights = floors * site.floor_height_m
-    index = build_sky_index(site, area, interval_m=INTERVAL, n_azimuth=N_AZIMUTH)
+    index = build_sky_index(site, area, n_azimuth=N_AZIMUTH)
 
     before = index.ps(heights)
     for ci in range(0, len(area.cells), 7):
@@ -95,7 +94,7 @@ def test_only_ridge_cells_affect_a_measurement_point():
     assign_height_limits(area)
     floors = np.array([c.max_floors for c in area.cells], dtype=int)
     heights = floors * site.floor_height_m
-    index = build_sky_index(site, area, interval_m=INTERVAL, n_azimuth=N_AZIMUTH)
+    index = build_sky_index(site, area, n_azimuth=N_AZIMUTH)
 
     point_index = 0
     ridge = set(index.ridge_cells(point_index, heights))
@@ -206,7 +205,7 @@ def test_summary_helper_agrees_with_the_index():
     assign_height_limits(area)
     floors = np.array([c.max_floors for c in area.cells], dtype=int)
     heights = floors * site.floor_height_m
-    index = build_sky_index(site, area, interval_m=INTERVAL, n_azimuth=N_AZIMUTH)
+    index = build_sky_index(site, area, n_azimuth=N_AZIMUTH)
 
     s = summarize(index, heights)
     assert s.n_points == len(index.points)

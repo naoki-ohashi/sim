@@ -171,7 +171,7 @@ mesh:
 ```yaml
 mesh:
   use_sky_ratio: true
-  sky_ratio_interval_m: 4.0   # 測定点の間隔(m)
+  # sky_ratio_interval_m: 1.0 # 測定点の間隔(m)。既定は条文の間隔（令135条の9〜11）
   sky_ratio_n_azimuth: 72     # 天空を何方位で刻むか
 ```
 

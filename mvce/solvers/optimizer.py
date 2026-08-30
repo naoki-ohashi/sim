@@ -78,8 +78,11 @@ class OptimizeOptions:
     coverage_threshold: float = 0.5
     use_sky_ratio: bool = False
     max_iterations: int = 4000
-    #: 天空率の測定点の間隔(m)と方位の分割数（use_sky_ratio のときだけ使う）
-    sky_ratio_interval_m: float = 4.0
+    #: 天空率の測定点の間隔(m)。**既定は条文の間隔**（令135条の9〜11:
+    #: 道路は幅員の1/2、隣地は8m/6.2m、北側は1m/2m）。値を入れると
+    #: そこまで**細かく**できますが、条文より粗くはできません。
+    sky_ratio_interval_m: float | None = None
+    #: 方位の分割数（use_sky_ratio のときだけ使う）
     sky_ratio_n_azimuth: int = 72
     #: 日影規制への対応方法。ENVELOPE_FAMILIES のいずれか。
     envelope_family: str = "voxel"
@@ -627,7 +630,7 @@ def optimize(
             before = floors.copy()
             if has_sky:
                 sky_index = build_sky_index(
-                    site, area, interval_m=opt.sky_ratio_interval_m,
+                    site, area, max_interval_m=opt.sky_ratio_interval_m,
                     n_azimuth=opt.sky_ratio_n_azimuth)
             roof_result = search_roof_envelope(
                 site, area, shadow_spec, floors, floor_h,
@@ -649,7 +652,7 @@ def optimize(
             notes.extend(roof_result.notes)
         elif has_sky:
             sky_index = build_sky_index(
-                site, area, interval_m=opt.sky_ratio_interval_m,
+                site, area, max_interval_m=opt.sky_ratio_interval_m,
                 n_azimuth=opt.sky_ratio_n_azimuth)
 
         # 天空率がまだ解消されていなければ（日影の指定が無かった、または
@@ -667,7 +670,7 @@ def optimize(
         # 気づけない（`_resolve_shadow_and_sky_jointly` のdocstring参照）。
         shadow_index = build_shadow_index(site, area, shadow_spec)
         sky_index = build_sky_index(
-            site, area, interval_m=opt.sky_ratio_interval_m,
+            site, area, max_interval_m=opt.sky_ratio_interval_m,
             n_azimuth=opt.sky_ratio_n_azimuth)
         shadow_limited, removed, sky_limited, removed_sky, joint_notes = (
             _resolve_shadow_and_sky_jointly(
@@ -682,7 +685,7 @@ def optimize(
             notes.extend(shadow_notes)
         if has_sky:
             sky_index = build_sky_index(
-                site, area, interval_m=opt.sky_ratio_interval_m,
+                site, area, max_interval_m=opt.sky_ratio_interval_m,
                 n_azimuth=opt.sky_ratio_n_azimuth)
             sky_limited, removed_sky, sky_notes = _resolve_sky_ratio(
                 area, floors, sky_index, floor_h, opt.max_iterations)

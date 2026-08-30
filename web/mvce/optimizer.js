@@ -266,7 +266,9 @@
     const opt = Object.assign({
       cellSizeXM: 3.0, cellSizeYM: 3.0, coverageThreshold: 0.5,
       useSkyRatio: false, maxIterations: 4000,
-      skyRatioIntervalM: 4.0, skyRatioNAzimuth: 72,
+      // 測定点の間隔は条文が定める（令135条の9〜11）。null で条文どおり。
+      // 値を入れると細かくできるが、条文より粗くはできない。
+      skyRatioIntervalM: null, skyRatioNAzimuth: 72,
     }, options || {});
 
     const far = E.computeFar(site);

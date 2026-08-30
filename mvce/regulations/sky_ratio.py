@@ -19,11 +19,16 @@
 
 ## 実装上の注意
 
-天空図の投影方法と測定点の配置は、内部で一貫した近似（正射影・境界線上の
-等間隔配置）を使っています。**告示が定める厳密な測定点設置規則には準拠して
-いません。** Ps と Pr を同じ方法で比較しているので相対比較の一貫性はあり
-ますが、天空率の絶対値を認定ソフトの数値と突き合わせる用途には使えません。
-確認申請には使用できません（docs/mvce/disclaimer.md）。
+**算定位置は令135条の9・10・11 に合わせました**（`sky_positions.py`）。
+基準線・間隔・想定半球の中心の高さは条文どおりです。
+
+**天空図の投影方法はまだ近似です。** 正射影（ρ = cos仰角）で方位を等分
+サンプリングしており、告示が定める作図方法そのものではありません。また
+令135条の5 の Ab は「建築物**及びその敷地の地盤**」ですが、地盤の投影は
+まだ見ていません（平坦地では寄与しません）。Ps と Pr を同じ方法で比較して
+いるので相対比較の一貫性はありますが、天空率の絶対値を認定ソフトの数値と
+突き合わせる用途には使えません。確認申請には使用できません
+（docs/mvce/disclaimer.md）。
 """
 from __future__ import annotations
 
@@ -33,11 +38,11 @@ from dataclasses import dataclass
 from shapely.geometry import LineString, Point as ShPoint
 from shapely.ops import nearest_points
 
-from ..geometry import Point, edge_direction, interior_normal
+from ..geometry import Point
 from ..massing import Block
 from ..site import Site
 from .height_field import buildable_ring_at_height, max_relevant_height
-from .north_slant import applies as north_applies, north_edges
+from .sky_positions import MeasurementPosition, all_positions
 
 RAY_LENGTH = 1.0e5
 # 測定点を境界線から極わずか外へ出す。境界線上ちょうどだと、後退0の壁面と
@@ -50,6 +55,7 @@ class SkyRatioCheck:
     point: Point
     kind: str          # "road" | "adjacent" | "north"
     edge_index: int
+    z_m: float         # 想定半球の中心の高さ（令135条の9〜11）
     ps: float
     pr: float
 
@@ -114,38 +120,19 @@ def sky_ratio_percent(point3: tuple[float, float, float], blocks: list[Block],
     return total / math.pi * 100.0
 
 
-def measurement_points(site: Site, interval_m: float = 2.0) -> list[tuple[Point, str, int]]:
-    """各規制対象の境界線に沿った測定点（点, 種別, 辺インデックス）。
+def measurement_points(
+    site: Site, max_interval_m: float | None = None
+) -> list[MeasurementPosition]:
+    """算定位置（令135条の9・10・11）。詳細は `sky_positions.py`。
 
-    道路は「道路の反対側の境界線」上、隣地・北側は境界線上に置きます。
+    **道路は前面道路の反対側の境界線上、隣地は境界線から16m（12.4m）外側、
+    北側は真北方向に4m（8m）外側**で、間隔も規制ごとに違います。
+    以前はすべて境界線上・2m間隔でしたが、条文と違っていました。
+
+    `max_interval_m` は条文の間隔をさらに細かくしたいときだけ使います
+    （粗くはできません）。
     """
-    result: list[tuple[Point, str, int]] = []
-    north_set = set(north_edges(site)) if north_applies(site) else set()
-
-    for idx, edge in enumerate(site.edges):
-        if edge.kind.value == "none":
-            continue
-        if edge.is_road:
-            kind = "road"
-            shift = edge.road_width_m
-        elif idx in north_set:
-            kind = "north"
-            shift = 0.0
-        else:
-            kind = "adjacent"
-            shift = 0.0
-
-        nx, ny = interior_normal(edge.p1, edge.p2)
-        offset = shift + MEASUREMENT_EPSILON_M
-        p1 = (edge.p1[0] - offset * nx, edge.p1[1] - offset * ny)
-        p2 = (edge.p2[0] - offset * nx, edge.p2[1] - offset * ny)
-        dx, dy = edge_direction(p1, p2)
-        length = math.hypot(p2[0] - p1[0], p2[1] - p1[1])
-        count = max(2, math.ceil(length / interval_m) + 1)
-        for k in range(count):
-            t = length * k / (count - 1)
-            result.append(((p1[0] + t * dx, p1[1] + t * dy), kind, idx))
-    return result
+    return all_positions(site, max_interval_m)
 
 
 def reference_building(site: Site, n_layers: int = 20) -> list[Block]:
@@ -169,21 +156,24 @@ def reference_building(site: Site, n_layers: int = 20) -> list[Block]:
 
 
 def check(site: Site, proposed: list[Block], reference: list[Block] | None = None,
-          interval_m: float = 2.0, n_azimuth: int = 120,
-          measurement_height_m: float = 0.0,
+          max_interval_m: float | None = None, n_azimuth: int = 120,
           azimuth_offset_ratio: float = 0.0) -> list[SkyRatioCheck]:
-    """すべての測定点で Ps ≧ Pr を確認する。
+    """すべての算定位置で Ps ≧ Pr を確認する。
 
     Ps と Pr は**同じ方位**でサンプリングします。比較の一貫性が保たれれば
     よいので、`azimuth_offset_ratio` はどちらにも同じ値が使われます。
+
+    想定半球の中心の高さは位置ごとに違います（道路は路面の中心、隣地・
+    北側は敷地の地盤面。いずれも令135条の9〜11 の高低差みなしを含む）。
     """
     if reference is None:
         reference = reference_building(site)
     results = []
-    for point, kind, edge_index in measurement_points(site, interval_m):
-        p3 = (point[0], point[1], measurement_height_m)
+    for position in measurement_points(site, max_interval_m):
+        p3 = position.point3
         results.append(SkyRatioCheck(
-            point=point, kind=kind, edge_index=edge_index,
+            point=position.point, kind=position.kind,
+            edge_index=position.edge_index, z_m=position.z_m,
             ps=sky_ratio_percent(p3, proposed, n_azimuth, azimuth_offset_ratio),
             pr=sky_ratio_percent(p3, reference, n_azimuth, azimuth_offset_ratio),
         ))

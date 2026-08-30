@@ -700,33 +700,104 @@
     return (total / Math.PI) * 100;
   }
 
-  // 各規制対象の境界線に沿った測定点（{point, kind, edgeIndex}）。
-  // 道路は「道路の反対側の境界線」上、隣地・北側は境界線上に置く。
-  function skyMeasurementPoints(site, intervalM) {
-    intervalM = intervalM || 2.0;
+  /* 天空率の算定位置（令135条の9・10・11）。Python版 sky_positions.py 相当。
+   *
+   * 規制ごとに基準線も間隔も高さも違う。
+   *   道路（令135条の9） … 前面道路の反対側の境界線上 / 路面の中心 / 幅員の1/2
+   *   隣地（令135条の10）… 境界線から16m(1.25) or 12.4m(2.5) 外側 / 地盤面 / 8m or 6.2m
+   *   北側（令135条の11）… 真北方向に4m(低層) or 8m(中高層) 外側 / 地盤面 / 1m or 2m
+   * 基準線までの距離は法56条7項各号。
+   *
+   * 以前はすべて境界線上・2m間隔だったが、条文と違っていた。
+   */
+  const ADJACENT_BASELINE_M = { 1.25: 16.0, 2.5: 12.4 };
+  const ADJACENT_POINT_INTERVAL_M = { 1.25: 8.0, 2.5: 6.2 };
+  const NORTH_BASELINE_M = { '1low': 4.0, '2low': 4.0, denen: 4.0, '1mid': 8.0, '2mid': 8.0 };
+  const NORTH_POINT_INTERVAL_M = { '1low': 1.0, '2low': 1.0, denen: 1.0, '1mid': 2.0, '2mid': 2.0 };
+
+  // 条文の間隔と利用者の指定の厳しい方。粗くする方向は受け付けない。
+  function capInterval(statutoryM, userM) {
+    return (userM == null || userM <= 0) ? statutoryM : Math.min(statutoryM, userM);
+  }
+
+  // 両端 a・b を含み、間隔が maxInterval 以下になるよう均等配置
+  function evenlySpaced(a, b, maxIntervalM) {
+    const span = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (span <= 1e-9) return [a];
+    if (span <= maxIntervalM + 1e-9) return [a, b];
+    const n = Math.ceil(span / maxIntervalM - 1e-9);
+    const out = [];
+    for (let k = 0; k <= n; k++) {
+      out.push([a[0] + ((b[0] - a[0]) * k) / n, a[1] + ((b[1] - a[1]) * k) / n]);
+    }
+    return out;
+  }
+
+  function offsetOutward(edge, distanceM) {
+    const [nx, ny] = interiorNormal(edge.p1, edge.p2);
+    return [
+      [edge.p1[0] - distanceM * nx, edge.p1[1] - distanceM * ny],
+      [edge.p2[0] - distanceM * nx, edge.p2[1] - distanceM * ny],
+    ];
+  }
+
+  function offsetNorth(site, edge, distanceM) {
+    const [nx, ny] = northVector(site.northAngleDeg);
+    return [
+      [edge.p1[0] + distanceM * nx, edge.p1[1] + distanceM * ny],
+      [edge.p2[0] + distanceM * nx, edge.p2[1] + distanceM * ny],
+    ];
+  }
+
+  // {point, z, kind, edgeIndex} の配列
+  function skyMeasurementPoints(site, maxIntervalM) {
     const result = [];
-    const northApplies = !!northSlantParams(site.zoning.zoneType);
-    const northSet = northApplies ? new Set(northEdgeIndices(site)) : new Set();
+    const z = site.zoning;
 
+    // 道路（令135条の9）
     site.edges.forEach((edge, idx) => {
-      if (edge.kind === 'none') return;
-      let kind, shift;
-      if (edge.kind === 'road') { kind = 'road'; shift = edge.roadWidthM; }
-      else if (northSet.has(idx)) { kind = 'north'; shift = 0; }
-      else { kind = 'adjacent'; shift = 0; }
-
-      const [nx, ny] = interiorNormal(edge.p1, edge.p2);
-      const offset = shift + SKY_MEASUREMENT_EPSILON_M;
-      const p1 = [edge.p1[0] - offset * nx, edge.p1[1] - offset * ny];
-      const p2 = [edge.p2[0] - offset * nx, edge.p2[1] - offset * ny];
-      const [dx, dy] = edgeDirection(p1, p2);
-      const length = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
-      const count = Math.max(2, Math.ceil(length / intervalM) + 1);
-      for (let k = 0; k < count; k++) {
-        const t = (length * k) / (count - 1);
-        result.push({ point: [p1[0] + t * dx, p1[1] + t * dy], kind, edgeIndex: idx });
+      if (edge.kind !== 'road') return;
+      const [a, b] = offsetOutward(edge, edge.roadWidthM);
+      // 令135条の9第1項: 路面の中心の高さ。第4項の高低差みなしを含む
+      const zc = edge.groundLevelDiffM + roadLevelRelax(edge);
+      const interval = capInterval(edge.roadWidthM / 2, maxIntervalM);
+      for (const point of evenlySpaced(a, b, interval)) {
+        result.push({ point, z: zc, kind: 'road', edgeIndex: idx });
       }
     });
+
+    // 隣地（令135条の10）
+    const adjParams = adjacentSlantParams(z.zoneType, z.farRatio,
+      z.unspecifiedAdjacentSlantSlope, z.adjacentSlant25Designated);
+    if (adjParams) {
+      const slope = adjParams[1];
+      const baseline = ADJACENT_BASELINE_M[slope];
+      const interval = capInterval(ADJACENT_POINT_INTERVAL_M[slope], maxIntervalM);
+      site.edges.forEach((edge, idx) => {
+        if (edge.kind !== 'adjacent') return;
+        const [a, b] = offsetOutward(edge, baseline);
+        const zc = levelRelax(edge);   // 令135条の10第4項
+        for (const point of evenlySpaced(a, b, interval)) {
+          result.push({ point, z: zc, kind: 'adjacent', edgeIndex: idx });
+        }
+      });
+    }
+
+    // 北側（令135条の11）
+    const northBase = NORTH_BASELINE_M[z.zoneType];
+    if (northBase != null) {
+      const interval = capInterval(NORTH_POINT_INTERVAL_M[z.zoneType], maxIntervalM);
+      for (const idx of northEdgeIndices(site)) {
+        const edge = site.edges[idx];
+        // 北側が前面道路のときは反対側の境界線が起点（法56条1項3号）
+        const distance = northBase + (edge.kind === 'road' ? edge.roadWidthM : 0);
+        const [a, b] = offsetNorth(site, edge, distance);
+        const zc = levelRelax(edge);   // 令135条の11第4項
+        for (const point of evenlySpaced(a, b, interval)) {
+          result.push({ point, z: zc, kind: 'north', edgeIndex: idx });
+        }
+      }
+    }
     return result;
   }
 
@@ -737,24 +808,24 @@
    * 求まるので、以後は高さ配列との比較だけで天空率が求まる。
    * 適合建築物（Pr）は形が変わらないので、実際の多角形で1回だけ計算する。
    */
-  const DEFAULT_SKY_INTERVAL_M = 4.0;
+  // 測定点の間隔は条文が定めるので既定値を持たない（令135条の9〜11）
   const DEFAULT_SKY_N_AZIMUTH = 72;
   const SKY_AZIMUTH_OFFSET_RATIO = 0.5;
   const SKY_TOLERANCE_PERCENT = 1e-9;
 
-  function buildSkyIndex(site, area, intervalM, nAzimuth, measurementHeightM, reference, azimuthOffsetRatio) {
-    intervalM = intervalM || DEFAULT_SKY_INTERVAL_M;
+  function buildSkyIndex(site, area, maxIntervalM, nAzimuth, reference, azimuthOffsetRatio) {
     nAzimuth = nAzimuth || DEFAULT_SKY_N_AZIMUTH;
-    measurementHeightM = measurementHeightM || 0;
     azimuthOffsetRatio = azimuthOffsetRatio != null ? azimuthOffsetRatio : SKY_AZIMUTH_OFFSET_RATIO;
     if (!reference) reference = referenceBuilding(site);
 
     const nCells = area.cells.length;
     const boxes = area.cells.map(c => c.bounds);
-    const samples = skyMeasurementPoints(site, intervalM);
+    const samples = skyMeasurementPoints(site, maxIntervalM);
     const points = samples.map(s => s.point);
     const kinds = samples.map(s => s.kind);
     const edgeIndices = samples.map(s => s.edgeIndex);
+    // 想定半球の中心の高さは位置ごとに違う（令135条の9〜11）
+    const zM = samples.map(s => s.z);
 
     const directions = azimuthsDeg(nAzimuth, azimuthOffsetRatio).map(a => {
       const rad = (a * Math.PI) / 180;
@@ -774,12 +845,12 @@
         });
       }
       distances.push(table);
-      pr[i] = skyRatioPercent([point[0], point[1], measurementHeightM], reference, nAzimuth, azimuthOffsetRatio);
+      pr[i] = skyRatioPercent([point[0], point[1], zM[i]], reference, nAzimuth, azimuthOffsetRatio);
     });
 
     return {
-      points, kinds, edgeIndices, distances, pr,
-      measurementHeightM, nAzimuth, nCells, azimuthOffsetRatio,
+      points, kinds, edgeIndices, distances, pr, zM,
+      nAzimuth, nCells, azimuthOffsetRatio,
       dPhi: (2 * Math.PI) / nAzimuth,
     };
   }
@@ -794,7 +865,7 @@
       const base = ai * n;
       let maxElevation = 0;
       for (let ci = 0; ci < n; ci++) {
-        const above = Math.max(heights[ci] - index.measurementHeightM, 0);
+        const above = Math.max(heights[ci] - index.zM[pointIndex], 0);
         const elevation = Math.atan2(above, table[base + ci]);
         if (elevation > maxElevation) maxElevation = elevation;
       }
@@ -829,7 +900,7 @@
       const base = ai * n;
       let bestCell = -1, bestElevation = -Infinity;
       for (let ci = 0; ci < n; ci++) {
-        const above = Math.max(heights[ci] - index.measurementHeightM, 0);
+        const above = Math.max(heights[ci] - index.zM[pointIndex], 0);
         const elevation = Math.atan2(above, table[base + ci]);
         if (elevation > bestElevation) { bestElevation = elevation; bestCell = ci; }
       }
@@ -1111,6 +1182,6 @@
     requiredSetbackForHeight, buildableRingAtHeight, maxRelevantHeight, referenceBuilding,
     rayPolygonEntryDistance, silhouetteElevationRad, azimuthsDeg, skyRatioPercent,
     skyMeasurementPoints, buildSkyIndex, skyPsAt, skyWorst, skyIsCompliant, skyRidgeCells,
-    skySummary, DEFAULT_SKY_INTERVAL_M, DEFAULT_SKY_N_AZIMUTH, SKY_AZIMUTH_OFFSET_RATIO,
+    skySummary, DEFAULT_SKY_N_AZIMUTH, SKY_AZIMUTH_OFFSET_RATIO,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

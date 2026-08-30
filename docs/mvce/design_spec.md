@@ -832,7 +832,7 @@ mesh:
   # mesh_angle_deg: 0
   # coverage_threshold: 0.5
   # use_sky_ratio: false      # true で斜線制限に代えて天空率で判定（5.5節）
-  # sky_ratio_interval_m: 4.0 # 天空率の測定点の間隔(m)
+  # sky_ratio_interval_m: 1.0 # 天空率の測定点の間隔(m)。既定は条文の間隔
   # sky_ratio_n_azimuth: 72   # 天空を何方位で刻むか
   # envelope_family: voxel    # voxel（既定）/ lean_to（屋根越し）/ ridge（棟状。5.4節）
   # roof_angle_span_deg: 15.0 # 棟の向きを探索する範囲（臨界方位を中心に±この角度）

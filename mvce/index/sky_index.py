@@ -62,8 +62,8 @@ from ..regulations.sky_ratio import (
 from .shadow_index import _ray_entry_distances
 from ..site import Site
 
-#: 天空率の測定点の間隔(m)と方位の分割数の既定値
-DEFAULT_INTERVAL_M = 4.0
+#: 方位の分割数の既定値。測定点の**間隔は条文が定める**ので既定値を
+#: 持ちません（令135条の9〜11。`regulations/sky_positions.py`）。
 DEFAULT_N_AZIMUTH = 72
 
 #: 方位を刻み幅の半分だけずらす。0/90/180/270度ちょうどを避けることで、
@@ -87,7 +87,9 @@ class SkyIndex:
     edge_indices: list[int]
     distances: list[np.ndarray]      # 点ごとの (方位, マス)
     pr: np.ndarray                   # 点ごとの適合建築物の天空率(%)
-    measurement_height_m: float
+    #: 点ごとの想定半球の中心の高さ（令135条の9〜11）。道路は路面の中心、
+    #: 隣地・北側は敷地の地盤面で、位置ごとに違う。
+    z_m: np.ndarray
     n_azimuth: int
     n_cells: int
     azimuth_offset_ratio: float = AZIMUTH_OFFSET_RATIO
@@ -101,7 +103,7 @@ class SkyIndex:
         dist = self.distances[point_index]
         if dist.size == 0:
             return 100.0
-        above = heights - self.measurement_height_m
+        above = heights - self.z_m[point_index]
         elevation = np.arctan2(np.maximum(above, 0.0)[None, :], dist)
         rho = np.cos(elevation.max(axis=1))
         return float((0.5 * rho * rho * self.d_phi).sum() / math.pi * 100.0)
@@ -134,7 +136,7 @@ class SkyIndex:
         dist = self.distances[point_index]
         if dist.size == 0:
             return []
-        above = np.maximum(heights - self.measurement_height_m, 0.0)
+        above = np.maximum(heights - self.z_m[point_index], 0.0)
         elevation = np.arctan2(above[None, :], dist)
         best = elevation.argmax(axis=1)
         # 仰角0の方位（何も見えていない）は稜線を作っていない
@@ -179,9 +181,8 @@ def summarize(index: SkyIndex, heights: np.ndarray) -> SkyRatioSummary:
 def build_sky_index(
     site: Site,
     area: BuildableArea,
-    interval_m: float = DEFAULT_INTERVAL_M,
+    max_interval_m: float | None = None,
     n_azimuth: int = DEFAULT_N_AZIMUTH,
-    measurement_height_m: float = 0.0,
     reference: list[Block] | None = None,
     azimuth_offset_ratio: float = AZIMUTH_OFFSET_RATIO,
 ) -> SkyIndex:
@@ -193,10 +194,11 @@ def build_sky_index(
     if reference is None:
         reference = reference_building(site)
 
-    samples = measurement_points(site, interval_m)
-    points = [p for p, _, _ in samples]
-    kinds = [k for _, k, _ in samples]
-    edges = [e for _, _, e in samples]
+    samples = measurement_points(site, max_interval_m)
+    points = [s.point for s in samples]
+    kinds = [s.kind for s in samples]
+    edges = [s.edge_index for s in samples]
+    z_m = np.array([s.z_m for s in samples], dtype=float)
 
     # 方位は図面座標（0が+Y方向、時計回り）。sky_ratio.py の取り方に合わせる。
     angles = azimuths_deg(n_azimuth, azimuth_offset_ratio)
@@ -213,13 +215,12 @@ def build_sky_index(
         distances.append(table)
         # Pr は形が変わらないので1回だけ。Ps と同じ方位でサンプリングする。
         pr[i] = sky_ratio_percent(
-            (point[0], point[1], measurement_height_m), reference,
+            (point[0], point[1], float(z_m[i])), reference,
             n_azimuth, azimuth_offset_ratio)
 
     return SkyIndex(
         points=points, kinds=kinds, edge_indices=edges,
-        distances=distances, pr=pr,
-        measurement_height_m=measurement_height_m,
+        distances=distances, pr=pr, z_m=z_m,
         n_azimuth=n_azimuth, n_cells=len(area.cells),
         azimuth_offset_ratio=azimuth_offset_ratio,
     )
