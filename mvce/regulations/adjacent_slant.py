@@ -24,7 +24,7 @@ import math
 
 from ..geometry import Point, point_line_distance
 from ..site import Boundary, RelaxationKind, Site
-from ..zoning import adjacent_slant_params
+from ..zoning import adjacent_slant_item, adjacent_slant_params
 
 # 令135条の3第1項1号の緩和対象: 公園・広場・水面・線路敷
 ADJACENT_RELAXATION_KINDS = {RelaxationKind.PARK, RelaxationKind.WATER, RelaxationKind.RAILWAY}
@@ -45,12 +45,22 @@ def _level_relaxation(edge: Boundary) -> float:
 
 
 def applies(site: Site) -> bool:
-    return adjacent_slant_params(site.zoning.zone_type) is not None
+    """隣地斜線の適用がある用途地域か。
+
+    適用の有無は法56条1項2号イ〜ニの列挙だけで決まるので、勾配の指定が
+    無い無指定区域でもここは答えられます（`_params()` は答えられません）。
+    """
+    return adjacent_slant_item(site.zoning.zone_type) is not None
 
 
 def edge_height_limit(site: Site, edge_index: int, point: Point) -> float:
     edge = site.edges[edge_index]
-    params = adjacent_slant_params(site.zoning.zone_type)
+    params = adjacent_slant_params(
+        site.zoning.zone_type,
+        site.zoning.far_ratio,
+        site.zoning.unspecified_adjacent_slant_slope,
+        site.zoning.adjacent_slant_2_5_designated,
+    )
     if params is None:
         return math.inf
     start_height, slope = params
@@ -73,7 +83,12 @@ def height_limit_at(site: Site, point: Point) -> float:
 def required_setback_for_height(site: Site, edge_index: int, height_m: float) -> float:
     """高さ `height_m` を確保するために必要な、隣地境界線からの後退距離。"""
     edge = site.edges[edge_index]
-    params = adjacent_slant_params(site.zoning.zone_type)
+    params = adjacent_slant_params(
+        site.zoning.zone_type,
+        site.zoning.far_ratio,
+        site.zoning.unspecified_adjacent_slant_slope,
+        site.zoning.adjacent_slant_2_5_designated,
+    )
     if params is None or edge.kind.value != "adjacent" or height_m <= 0:
         return 0.0
     start_height, slope = params

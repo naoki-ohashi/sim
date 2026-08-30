@@ -180,18 +180,104 @@ def road_slant_tier(
 
 
 # --- 隣地斜線（法56条1項2号）----------------------------------------
-# 低層住居専用・田園住居は絶対高さ制限（法55条）があるため隣地斜線の適用はない。
-ADJACENT_SLANT_BY_GROUP: dict[str, tuple[float, float]] = {
-    "residential": (20.0, 1.25),
-    "other": (31.0, 2.5),
+# 原文は docs/mvce/statutes/建築基準法.md の第56条第1項第2号。
+#
+# 号は イ〜ニ に分かれ、それぞれ勾配を定めます。立上り高さは用途地域では
+# なく**勾配で決まります** — 1.25 なら 20m、2.5 なら 31m。号の本文が
+# 「イ又はニに定める数値が一・二五とされている建築物にあつては二十
+# メートルを、イからニまでに定める数値が二・五とされている建築物にあつて
+# は三十一メートルを加えたもの」と書いているとおりです。
+#
+# 低層住居専用・田園住居は**イ〜ニのどれにも列挙されていません**。
+# したがって隣地斜線の適用がありません。絶対高さ制限（法55条）があるから
+# 結果的にそうなる、という説明を見かけますが、条文上は単に列挙が無いだけ
+# です。
+ADJACENT_SLANT_ITEM_BY_ZONE: dict[str, str] = {
+    # イ: 中高層住専・第一種住居・第二種住居・準住居
+    "1mid": "i", "2mid": "i", "1res": "i", "2res": "i", "quasi_res": "i",
+    # ロ: 近隣商業・準工業・商業・工業・工業専用
+    "neighbor_commercial": "ro", "quasi_industrial": "ro",
+    "commercial": "ro", "industrial": "ro", "industrial_exclusive": "ro",
+    # ハ: 高層住居誘導地区（用途地域ではないのでここには無い）
+    # ニ: 用途地域の指定のない区域
+    "unspecified": "ni",
+    # 低層住専・田園住居は列挙が無い（＝適用なし）ので載せない
 }
 
+#: 勾配 → 立上り高さ。号の本文が定める対応。
+ADJACENT_SLANT_START_HEIGHT_M: dict[float, float] = {1.25: 20.0, 2.5: 31.0}
 
-def adjacent_slant_params(zone_type: str) -> tuple[float, float] | None:
-    """(立上り高さ, 勾配)。適用がない地域は None。"""
-    if zone_type in LOW_RISE_ZONES:
-        return None  # 絶対高さ制限が先に効くため隣地斜線の適用なし
-    return ADJACENT_SLANT_BY_GROUP[zone_group(zone_type)]
+#: ニ（無指定）で特定行政庁が選べる勾配。
+UNSPECIFIED_ADJACENT_SLANT_SLOPES = (1.25, 2.5)
+
+
+def adjacent_slant_item(zone_type: str) -> str | None:
+    """用途地域が法56条1項2号のどの号に当たるか。適用が無い地域は None。"""
+    if zone_type not in ALL_ZONES:
+        raise ValueError(f"不明な用途地域: {zone_type!r}（有効な値: {sorted(ALL_ZONES)}）")
+    return ADJACENT_SLANT_ITEM_BY_ZONE.get(zone_type)
+
+
+def _item_i_allows_2_5(zone_type: str, far_ratio: float) -> bool:
+    """イのただし書の 2.5 を指定できる地域か。
+
+    条文は「第五十二条第一項第二号の規定により容積率の限度が十分の三十
+    以下とされている第一種中高層住居専用地域及び第二種中高層住居専用地域
+    **以外の地域**のうち、特定行政庁が（略）指定する区域」としています。
+    つまり中高層住専で容積率が 30/10 以下の場合だけ対象外です。
+    """
+    return not (zone_type in MID_RISE_ZONES and far_ratio <= 3.0)
+
+
+def adjacent_slant_params(
+    zone_type: str,
+    far_ratio: float | None = None,
+    unspecified_slope: float | None = None,
+    designated_2_5: bool = False,
+) -> tuple[float, float] | None:
+    """(立上り高さ, 勾配)。隣地斜線の適用が無い用途地域は None。
+
+    `unspecified_slope` はニ（無指定）専用です。条文が「一・二五又は二・五
+    のうち特定行政庁が定めるもの」としており、どちらかを勝手に決められ
+    ません。指定が無い無指定区域では `UndeterminedRegulation` です（原則H）。
+
+    `designated_2_5` はイのただし書。特定行政庁が指定する区域で 1.25 が
+    2.5 に変わります。`far_ratio` はその適用可否の判定に要ります。
+    """
+    item = adjacent_slant_item(zone_type)
+    if item is None:
+        return None
+
+    if item == "ro":
+        slope = 2.5
+    elif item == "ni":
+        if unspecified_slope is None:
+            raise UndeterminedRegulation(
+                "用途地域の指定のない区域の隣地斜線勾配は、法56条1項2号ニにより "
+                "1.25 か 2.5 のうち特定行政庁が定めるものです。どちらか分からない"
+                "ため計算できません。ZoningParams.unspecified_adjacent_slant_slope に "
+                "1.25 または 2.5 を指定してください"
+            )
+        if unspecified_slope not in UNSPECIFIED_ADJACENT_SLANT_SLOPES:
+            raise ValueError(
+                f"無指定区域の隣地斜線勾配は 1.25 か 2.5 です（指定値: {unspecified_slope}）"
+            )
+        slope = unspecified_slope
+    else:  # イ
+        slope = 1.25
+        if designated_2_5:
+            if far_ratio is None:
+                raise ValueError(
+                    "イのただし書（特定行政庁の指定で 2.5）の判定には far_ratio が要ります"
+                )
+            if not _item_i_allows_2_5(zone_type, far_ratio):
+                raise ValueError(
+                    f"{ZONE_LABELS_JA[zone_type]}で容積率の限度が 30/10 以下の場合、"
+                    f"法56条1項2号イのただし書は適用できません"
+                )
+            slope = 2.5
+
+    return ADJACENT_SLANT_START_HEIGHT_M[slope], slope
 
 
 # --- 北側斜線（法56条1項3号）----------------------------------------
@@ -371,6 +457,16 @@ class ZoningParams:
     #: ロ（高さ10m超・測定面4m）か。`"i"` / `"ro"` で指定します。
     unspecified_shadow_row: str | None = None
 
+    #: 法56条1項2号ニ。用途地域の指定のない区域の隣地斜線勾配。
+    #: 「一・二五又は二・五のうち特定行政庁が定めるもの」なので、
+    #: 無指定区域ではこれを与えないと隣地斜線が計算できません。
+    unspecified_adjacent_slant_slope: float | None = None
+
+    #: 法56条1項2号イのただし書。特定行政庁が指定する区域では、イの
+    #: 1.25 が 2.5 になります（立上りも 20m → 31m）。中高層住専で容積率の
+    #: 限度が 30/10 以下の場合は対象外です。
+    adjacent_slant_2_5_designated: bool = False
+
     def __post_init__(self) -> None:
         if self.zone_type not in ALL_ZONES:
             raise ValueError(f"不明な用途地域: {self.zone_type!r}（有効: {sorted(ALL_ZONES)}）")
@@ -387,6 +483,13 @@ class ZoningParams:
         if self.unspecified_shadow_row not in (None, "i", "ro"):
             raise ValueError(
                 f"unspecified_shadow_row は 'i' か 'ro' です（指定値: {self.unspecified_shadow_row!r}）"
+            )
+        if (self.unspecified_adjacent_slant_slope is not None
+                and self.unspecified_adjacent_slant_slope
+                not in UNSPECIFIED_ADJACENT_SLANT_SLOPES):
+            raise ValueError(
+                "unspecified_adjacent_slant_slope は 1.25 か 2.5 です"
+                f"（指定値: {self.unspecified_adjacent_slant_slope}）"
             )
         if self.zone_type in LOW_RISE_ZONES and self.absolute_height_limit_m is None:
             # 低層住居専用・田園住居は法55条で10mまたは12mの制限が必ずある

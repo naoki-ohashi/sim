@@ -58,6 +58,8 @@ def _build_zoning(data: dict) -> ZoningParams:
         # 別表第四 四の項が特定行政庁／条例の指定に委ねている部分。
         unspecified_road_slant_slope=data.get("unspecified_road_slant_slope"),
         unspecified_shadow_row=data.get("unspecified_shadow_row"),
+        unspecified_adjacent_slant_slope=data.get("unspecified_adjacent_slant_slope"),
+        adjacent_slant_2_5_designated=data.get("adjacent_slant_2_5_designated", False),
     )
 
 

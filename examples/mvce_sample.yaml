@@ -66,7 +66,7 @@ site:
     coverage_ratio: 60      # 建蔽率(%)
     # absolute_height_limit_m: 10   # 低層住居専用等の絶対高さ制限
     #
-    # 以下2つは zone_type: unspecified（用途地域の指定のない区域）でだけ要ります。
+    # 以下3つは zone_type: unspecified（用途地域の指定のない区域）でだけ要ります。
     # どちらも条文が特定行政庁・条例の指定に委ねているので、既定値がありません。
     # 指定しないまま計算しようとすると UndeterminedRegulation で止まります。
     #
@@ -77,6 +77,17 @@ site:
     #   i  … 軒高7m超 または 地階を除く階数3以上 / 測定面 1.5m
     #   ro … 高さ10m超 / 測定面 4m
     # unspecified_shadow_row: ro
+    #
+    # 法56条1項2号ニ: 隣地斜線の勾配（1.25 か 2.5）。立上りは勾配で決まり、
+    # 1.25 なら 20m、2.5 なら 31m。
+    # unspecified_adjacent_slant_slope: 2.5
+    #
+    # --- ここから下は用途地域を問わず使えます ---
+    #
+    # 法56条1項2号イのただし書: 特定行政庁が指定する区域では、
+    # 中高層住専・住居系の隣地斜線が 1.25 → 2.5（立上り 20m → 31m）に
+    # なります。中高層住専で容積率の限度が 30/10 以下の場合は対象外です。
+    # adjacent_slant_2_5_designated: true
 
   floor_height_m: 3.2
 

@@ -232,3 +232,96 @@ def test_the_ten_metre_rule_is_unchanged():
     assert deemed_boundary_offsets(_site_with(RelaxationKind.WATER, 6.0))[0] == pytest.approx(3.0)
     assert deemed_boundary_offsets(_site_with(RelaxationKind.WATER, 10.0))[0] == pytest.approx(5.0)
     assert deemed_boundary_offsets(_site_with(RelaxationKind.WATER, 14.0))[0] == pytest.approx(9.0)
+
+
+# --- 法56条1項2号（隣地斜線・食い違い I） ----------------------------------
+
+from mvce.zoning import (  # noqa: E402
+    ADJACENT_SLANT_START_HEIGHT_M,
+    adjacent_slant_item,
+    adjacent_slant_params,
+)
+
+
+@pytest.mark.parametrize("zone", ["1mid", "2mid", "1res", "2res", "quasi_res"])
+def test_item_i_is_20m_and_1_25(zone):
+    """イ: 中高層住専・住居系 → 1.25、立上り 20m。"""
+    assert adjacent_slant_item(zone) == "i"
+    assert adjacent_slant_params(zone, 3.0) == (20.0, 1.25)
+
+
+@pytest.mark.parametrize("zone", ["neighbor_commercial", "quasi_industrial",
+                                  "commercial", "industrial", "industrial_exclusive"])
+def test_item_ro_is_31m_and_2_5(zone):
+    """ロ: 近隣商業・準工業・商業・工業・工業専用 → 2.5、立上り 31m。"""
+    assert adjacent_slant_item(zone) == "ro"
+    assert adjacent_slant_params(zone, 3.0) == (31.0, 2.5)
+
+
+@pytest.mark.parametrize("zone", ["1low", "2low", "denen"])
+def test_low_rise_zones_have_no_adjacent_slant(zone):
+    """低層住専・田園住居はイ〜ニのどれにも列挙されていない。"""
+    assert adjacent_slant_item(zone) is None
+    assert adjacent_slant_params(zone, 3.0) is None
+
+
+def test_item_ni_is_undetermined_without_a_designation():
+    """ニ: 無指定は「1.25 又は 2.5 のうち特定行政庁が定めるもの」（食い違い I）。
+
+    2.5 を既定にすると、1.25 が指定された区域で法が許すより高い建築物を
+    適合と判定してしまう。原則H に従って止める。
+    """
+    assert adjacent_slant_item("unspecified") == "ni"
+    with pytest.raises(UndeterminedRegulation):
+        adjacent_slant_params("unspecified", 3.0)
+
+
+@pytest.mark.parametrize("slope,start", [(1.25, 20.0), (2.5, 31.0)])
+def test_item_ni_accepts_either_designated_slope(slope, start):
+    assert adjacent_slant_params("unspecified", 3.0, slope) == (start, slope)
+
+
+def test_item_ni_rejects_other_slopes():
+    with pytest.raises(ValueError):
+        adjacent_slant_params("unspecified", 3.0, 1.5)
+
+
+def test_start_height_follows_the_slope_not_the_zone():
+    """立上りは勾配で決まる（号の本文）。1.25→20m、2.5→31m。"""
+    assert ADJACENT_SLANT_START_HEIGHT_M == {1.25: 20.0, 2.5: 31.0}
+    # 同じ無指定でも、勾配が変われば立上りも変わる
+    assert adjacent_slant_params("unspecified", 3.0, 1.25)[0] == 20.0
+    assert adjacent_slant_params("unspecified", 3.0, 2.5)[0] == 31.0
+
+
+def test_item_i_proviso_raises_the_slope_where_designated():
+    """イのただし書: 特定行政庁の指定で 1.25 → 2.5。"""
+    assert adjacent_slant_params("1res", 3.0, designated_2_5=True) == (31.0, 2.5)
+
+
+def test_item_i_proviso_excludes_mid_rise_at_or_below_30_10():
+    """中高層住専で容積率の限度が 30/10 以下なら、ただし書の対象外。"""
+    with pytest.raises(ValueError):
+        adjacent_slant_params("1mid", 3.0, designated_2_5=True)
+    # 30/10 を超えていれば対象
+    assert adjacent_slant_params("1mid", 4.0, designated_2_5=True) == (31.0, 2.5)
+
+
+def test_zoning_params_validates_the_unspecified_adjacent_slope():
+    with pytest.raises(ValueError):
+        ZoningParams(zone_type="unspecified", far_ratio=2.0, coverage_ratio=0.6,
+                     unspecified_adjacent_slant_slope=1.5)
+    ok = ZoningParams(zone_type="unspecified", far_ratio=2.0, coverage_ratio=0.6,
+                      unspecified_adjacent_slant_slope=2.5)
+    assert ok.unspecified_adjacent_slant_slope == 2.5
+
+
+def test_applies_is_answerable_without_the_designation():
+    """適用の有無は列挙だけで決まるので、勾配未指定でも答えられる。"""
+    from mvce.regulations.adjacent_slant import applies
+    site = Site.from_rings(
+        [(0.0, 0.0), (20.0, 0.0), (20.0, 30.0), (0.0, 30.0)],
+        [{"kind": "road", "road_width_m": 6.0}] + [{"kind": "adjacent"}] * 3,
+        zoning=ZoningParams(zone_type="unspecified", far_ratio=3.0, coverage_ratio=0.6),
+    )
+    assert applies(site) is True

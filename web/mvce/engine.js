@@ -170,6 +170,7 @@
   const RESIDENTIAL = new Set(['1low', '2low', 'denen', '1mid', '2mid', '1res', '2res', 'quasi_res']);
   const OTHER_GROUP = new Set(['neighbor_commercial', 'commercial', 'quasi_industrial',
     'industrial', 'industrial_exclusive', 'unspecified']);
+  const ALL_ZONES = new Set([...RESIDENTIAL, ...OTHER_GROUP]);
 
   function zoneGroup(z) {
     if (RESIDENTIAL.has(z)) return 'residential';
@@ -222,9 +223,49 @@
     throw new Error('unreachable');
   }
 
-  const ADJACENT_BY_GROUP = { residential: [20.0, 1.25], other: [31.0, 2.5] };
-  function adjacentSlantParams(zone) {
-    return LOW_RISE.has(zone) ? null : ADJACENT_BY_GROUP[zoneGroup(zone)];
+  // 法56条1項2号 イ〜ニ。立上りは用途地域ではなく勾配で決まる
+  // （1.25 → 20m、2.5 → 31m）。低層住専・田園住居は列挙が無く適用なし。
+  const ADJACENT_SLANT_ITEM_BY_ZONE = {
+    '1mid': 'i', '2mid': 'i', '1res': 'i', '2res': 'i', quasi_res: 'i',
+    neighbor_commercial: 'ro', quasi_industrial: 'ro',
+    commercial: 'ro', industrial: 'ro', industrial_exclusive: 'ro',
+    unspecified: 'ni',
+  };
+  const ADJACENT_SLANT_START_HEIGHT_M = { 1.25: 20.0, 2.5: 31.0 };
+  const UNSPECIFIED_ADJACENT_SLANT_SLOPES = [1.25, 2.5];
+  const MID_RISE = new Set(['1mid', '2mid']);
+
+  function adjacentSlantItem(zone) {
+    if (!ALL_ZONES.has(zone)) throw new Error('不明な用途地域: ' + zone);
+    return ADJACENT_SLANT_ITEM_BY_ZONE[zone] || null;
+  }
+  function adjacentSlantParams(zone, farRatio, unspecifiedSlope, designated25) {
+    const item = adjacentSlantItem(zone);
+    if (item === null) return null;
+    let slope;
+    if (item === 'ro') {
+      slope = 2.5;
+    } else if (item === 'ni') {
+      if (unspecifiedSlope === undefined || unspecifiedSlope === null) {
+        throw new Error(
+          '用途地域の指定のない区域の隣地斜線勾配は、法56条1項2号ニにより ' +
+          '1.25 か 2.5 のうち特定行政庁が定めるものです。どちらか分からないため' +
+          '計算できません。zoning.unspecifiedAdjacentSlantSlope を指定してください');
+      }
+      if (!UNSPECIFIED_ADJACENT_SLANT_SLOPES.includes(unspecifiedSlope)) {
+        throw new Error('無指定区域の隣地斜線勾配は 1.25 か 2.5 です: ' + unspecifiedSlope);
+      }
+      slope = unspecifiedSlope;
+    } else {
+      slope = 1.25;
+      if (designated25) {
+        if (MID_RISE.has(zone) && farRatio <= 3.0) {
+          throw new Error('中高層住専で容積率 30/10 以下は法56条1項2号イのただし書の対象外');
+        }
+        slope = 2.5;
+      }
+    }
+    return [ADJACENT_SLANT_START_HEIGHT_M[slope], slope];
   }
   const NORTH_SLANT = {
     '1low': [5.0, 1.25], '2low': [5.0, 1.25], denen: [5.0, 1.25],
@@ -333,7 +374,8 @@
   }
 
   function adjacentHeightLimit(site, point) {
-    const params = adjacentSlantParams(site.zoning.zoneType);
+    const params = adjacentSlantParams(site.zoning.zoneType, site.zoning.farRatio,
+      site.zoning.unspecifiedAdjacentSlantSlope, site.zoning.adjacentSlant25Designated);
     if (!params) return Infinity;
     const [start, slope] = params;
     let limit = Infinity;
@@ -404,7 +446,8 @@
   // 隣地斜線: 高さ height_m を確保するために必要な、隣地境界線からの後退距離
   function adjacentRequiredSetback(site, edgeIndex, heightM) {
     const edge = site.edges[edgeIndex];
-    const params = adjacentSlantParams(site.zoning.zoneType);
+    const params = adjacentSlantParams(site.zoning.zoneType, site.zoning.farRatio,
+      site.zoning.unspecifiedAdjacentSlantSlope, site.zoning.adjacentSlant25Designated);
     if (!params || edge.kind !== 'adjacent' || heightM <= 0) return 0;
     const [start, slope] = params;
     const base = edge.wallSetbackM + relaxWidth(edge, ADJACENT_RELAX, true);
@@ -940,7 +983,8 @@
     polygonArea, polygonSignedArea, ensureCCW, dedupeRing, pointLineDistance,
     interiorNormal, outwardNormal, offsetPolygonByEdgeDistances, offsetRingOutward, sampleRing,
     northVector, azimuthOfVector, vectorForAzimuth, facesNorth,
-    zoneGroup, roadSlantRow, roadSlantTier, adjacentSlantParams, northSlantParams,
+    zoneGroup, roadSlantRow, roadSlantTier, adjacentSlantItem, adjacentSlantParams,
+    northSlantParams,
     computeFar, siteArea, maxBuildingArea, maxFloorArea, maxRoadWidth,
     appliedRoadWidth, roadHeightLimit, oppositeBoundaryLine, oppositeBoundaryLines,
     adjacentHeightLimit, northHeightLimit,
