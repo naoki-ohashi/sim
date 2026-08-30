@@ -136,9 +136,9 @@
 
   // -- 作図 ---------------------------------------------------------------
   const LAYERS = {
-    'MVE-SITE': 7, 'MVE-ROAD': 8, 'MVE-SETBACK': 3, 'MVE-OUTLINE': 5,
-    'MVE-MESH': 254, 'MVE-FLOORS': 2, 'MVE-SHADOW-5M': 1, 'MVE-SHADOW-10M': 30,
-    'MVE-NORTH': 1, 'MVE-SUMMARY': 7,
+    'MVCE-SITE': 7, 'MVCE-ROAD': 8, 'MVCE-SETBACK': 3, 'MVCE-OUTLINE': 5,
+    'MVCE-MESH': 254, 'MVCE-FLOORS': 2, 'MVCE-SHADOW-5M': 1, 'MVCE-SHADOW-10M': 30,
+    'MVCE-NORTH': 1, 'MVCE-SUMMARY': 7,
   };
 
   function roadPolygon(edge) {
@@ -152,14 +152,14 @@
   function addNorthSymbol(pen, site, origin, size) {
     const [nx, ny] = E.northVector(site.northAngleDeg);
     const tip = [origin[0] + nx * size, origin[1] + ny * size];
-    pen.line(origin, tip, 'MVE-NORTH', 1);
+    pen.line(origin, tip, 'MVCE-NORTH', 1);
     for (const sign of [1, -1]) {
       const angle = (150 * sign * Math.PI) / 180;
       const ax = nx * Math.cos(angle) - ny * Math.sin(angle);
       const ay = nx * Math.sin(angle) + ny * Math.cos(angle);
-      pen.line(tip, [tip[0] + ax * size * 0.25, tip[1] + ay * size * 0.25], 'MVE-NORTH', 1);
+      pen.line(tip, [tip[0] + ax * size * 0.25, tip[1] + ay * size * 0.25], 'MVCE-NORTH', 1);
     }
-    pen.text('N', [tip[0] + nx * size * 0.15, tip[1] + ny * size * 0.15], size * 0.2, 'MVE-NORTH', 1);
+    pen.text('N', [tip[0] + nx * size * 0.15, tip[1] + ny * size * 0.15], size * 0.2, 'MVCE-NORTH', 1);
   }
 
   /* 計算結果をDXF(R12)のテキストに組み立てる。
@@ -177,34 +177,34 @@
     const width = Math.max(...xs) - Math.min(...xs), height = Math.max(...ys) - Math.min(...ys);
     const span = Math.max(width, height, 1e-6);
 
-    pen.polyline(site.points, 'MVE-SITE', LAYERS['MVE-SITE']);
+    pen.polyline(site.points, 'MVCE-SITE', LAYERS['MVCE-SITE']);
 
     for (const edge of site.edges) {
       if (edge.kind !== 'road') continue;
-      pen.polyline(roadPolygon(edge), 'MVE-ROAD', LAYERS['MVE-ROAD']);
+      pen.polyline(roadPolygon(edge), 'MVCE-ROAD', LAYERS['MVCE-ROAD']);
       const mid = [(edge.p1[0] + edge.p2[0]) / 2, (edge.p1[1] + edge.p2[1]) / 2];
       const n = E.interiorNormal(edge.p1, edge.p2);
       pen.text(`W=${edge.roadWidthM.toFixed(1)}m`,
         [mid[0] - n[0] * edge.roadWidthM * 0.5, mid[1] - n[1] * edge.roadWidthM * 0.5],
-        span * 0.02, 'MVE-ROAD', LAYERS['MVE-ROAD']);
+        span * 0.02, 'MVCE-ROAD', LAYERS['MVCE-ROAD']);
     }
 
     if (result.area) {
       const outline = E.buildingOutline(site);
       if (outline && site.edges.some(e => e.wallSetbackM > 0)) {
-        pen.polyline(outline, 'MVE-SETBACK', LAYERS['MVE-SETBACK']);
+        pen.polyline(outline, 'MVCE-SETBACK', LAYERS['MVCE-SETBACK']);
       }
-      pen.polyline(result.area.outline, 'MVE-OUTLINE', LAYERS['MVE-OUTLINE']);
-      for (const cell of result.area.cells) pen.polyline(cell.rect, 'MVE-MESH', LAYERS['MVE-MESH']);
+      pen.polyline(result.area.outline, 'MVCE-OUTLINE', LAYERS['MVCE-OUTLINE']);
+      for (const cell of result.area.cells) pen.polyline(cell.rect, 'MVCE-MESH', LAYERS['MVCE-MESH']);
       const cellSize = Math.min(result.area.cellSizeXM, result.area.cellSizeYM);
       result.area.cells.forEach((cell, i) => {
         const f = result.floors[i];
-        if (f > 0) pen.text(String(f), cell.center, cellSize * 0.3, 'MVE-FLOORS', LAYERS['MVE-FLOORS']);
+        if (f > 0) pen.text(String(f), cell.center, cellSize * 0.3, 'MVCE-FLOORS', LAYERS['MVCE-FLOORS']);
       });
     }
 
     // 各階の平面輪郭（マスごと。Python版は結合した1本の輪郭線だが、ここでは
-    // マス単位のまま出す＝MVE-MESHと同様、CAD上では見た目は変わらない）
+    // マス単位のまま出す＝MVCE-MESHと同様、CAD上では見た目は変わらない）
     const byLevel = new Map();
     for (const block of result.blocks) {
       const level = Math.round(block.zBottom / site.floorHeightM);
@@ -212,21 +212,21 @@
       byLevel.get(level).push(block);
     }
     for (const level of [...byLevel.keys()].sort((a, b) => a - b)) {
-      const layer = `MVE-PLAN-${level + 1}`;
+      const layer = `MVCE-PLAN-${level + 1}`;
       const color = (level % 7) + 1;
       pen.addLayer(layer, color);
       for (const block of byLevel.get(level)) for (const rect of block.rects) pen.polyline(rect, layer, color);
     }
 
     if (shadowSpec) {
-      pen.polyline(E.regulationBoundary(site, shadowSpec), 'MVE-SITE', 253);
-      for (const [distance, layer] of [[5.0, 'MVE-SHADOW-5M'], [10.0, 'MVE-SHADOW-10M']]) {
+      pen.polyline(E.regulationBoundary(site, shadowSpec), 'MVCE-SITE', 253);
+      for (const [distance, layer] of [[5.0, 'MVCE-SHADOW-5M'], [10.0, 'MVCE-SHADOW-10M']]) {
         pen.polyline(E.shadowMeasurementPoints(site, shadowSpec, distance), layer, LAYERS[layer]);
       }
       if (isochroneLevels && isochroneLevels.length && result.area && isochrones) {
         const isoColors = [1, 2, 3, 4, 5, 6];
         isochroneLevels.forEach((level, idx) => {
-          const layer = `MVE-ISOCHRONE-${level}H`.replace(/\./g, '_');
+          const layer = `MVCE-ISOCHRONE-${level}H`.replace(/\./g, '_');
           const color = isoColors[idx % isoColors.length];
           const label = `${level}時間`;
           for (const [points, closed] of isochrones[level] || []) {
@@ -242,7 +242,7 @@
     const textHeight = span * 0.022;
     O.summaryLinesJa(result).forEach((line, i) => {
       pen.text(line, [Math.min(...xs), Math.min(...ys) - span * 0.12 - i * textHeight * 1.6],
-        textHeight, 'MVE-SUMMARY', LAYERS['MVE-SUMMARY']);
+        textHeight, 'MVCE-SUMMARY', LAYERS['MVCE-SUMMARY']);
     });
 
     return pen.toText();

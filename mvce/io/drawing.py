@@ -5,17 +5,17 @@
 
 | レイヤ | 内容 |
 |---|---|
-| `MVE-SITE` | 敷地境界線 |
-| `MVE-ROAD` | 前面道路（幅員ぶんの範囲） |
-| `MVE-SETBACK` | 壁面後退線 |
-| `MVE-OUTLINE` | 建物外郭線 |
-| `MVE-MESH` | メッシュの割り付け |
-| `MVE-FLOORS` | 各マスの階数（文字） |
-| `MVE-PLAN-n` | 各階の平面輪郭 |
-| `MVE-SHADOW-5M` / `MVE-SHADOW-10M` | 日影の測定線 |
-| `MVE-ISOCHRONE-{時間}H` | 等時間日影線（`shadow.isochrone_hours` を指定したときのみ） |
-| `MVE-NORTH` | 真北記号 |
-| `MVE-SUMMARY` | 計算結果の要約（文字） |
+| `MVCE-SITE` | 敷地境界線 |
+| `MVCE-ROAD` | 前面道路（幅員ぶんの範囲） |
+| `MVCE-SETBACK` | 壁面後退線 |
+| `MVCE-OUTLINE` | 建物外郭線 |
+| `MVCE-MESH` | メッシュの割り付け |
+| `MVCE-FLOORS` | 各マスの階数（文字） |
+| `MVCE-PLAN-n` | 各階の平面輪郭 |
+| `MVCE-SHADOW-5M` / `MVCE-SHADOW-10M` | 日影の測定線 |
+| `MVCE-ISOCHRONE-{時間}H` | 等時間日影線（`shadow.isochrone_hours` を指定したときのみ） |
+| `MVCE-NORTH` | 真北記号 |
+| `MVCE-SUMMARY` | 計算結果の要約（文字） |
 
 JWWが読める形式（R12・LINE/TEXTのみ・mm）で書き出します。理由は
 `dxf_pen.py` の説明を参照してください。
@@ -33,9 +33,9 @@ from .dxf_pen import JWW_UNITS_PER_METER, JwwDrawing
 from .dxf_r12 import R12Drawing
 
 LAYERS = {
-    "MVE-SITE": 7, "MVE-ROAD": 8, "MVE-SETBACK": 3, "MVE-OUTLINE": 5,
-    "MVE-MESH": 254, "MVE-FLOORS": 2, "MVE-SHADOW-5M": 1, "MVE-SHADOW-10M": 30,
-    "MVE-NORTH": 1, "MVE-SUMMARY": 7, "MVE-RIDGE": 6,
+    "MVCE-SITE": 7, "MVCE-ROAD": 8, "MVCE-SETBACK": 3, "MVCE-OUTLINE": 5,
+    "MVCE-MESH": 254, "MVCE-FLOORS": 2, "MVCE-SHADOW-5M": 1, "MVCE-SHADOW-10M": 30,
+    "MVCE-NORTH": 1, "MVCE-SUMMARY": 7, "MVCE-RIDGE": 6,
 }
 
 
@@ -53,16 +53,16 @@ def _road_polygon(site: Site, edge) -> list[Point]:
 def _add_north_symbol(pen: JwwDrawing, site: Site, origin: Point, size: float) -> None:
     nx, ny = site.north.north_vector
     tip = (origin[0] + nx * size, origin[1] + ny * size)
-    pen.line(origin, tip, "MVE-NORTH", 1)
+    pen.line(origin, tip, "MVCE-NORTH", 1)
     # 矢じり
     for sign in (1, -1):
         angle = math.radians(150 * sign)
         ax = nx * math.cos(angle) - ny * math.sin(angle)
         ay = nx * math.sin(angle) + ny * math.cos(angle)
         pen.line(tip, (tip[0] + ax * size * 0.25, tip[1] + ay * size * 0.25),
-                 "MVE-NORTH", 1)
+                 "MVCE-NORTH", 1)
     pen.text("N", (tip[0] + nx * size * 0.15, tip[1] + ny * size * 0.15),
-             size * 0.2, "MVE-NORTH", 1)
+             size * 0.2, "MVCE-NORTH", 1)
 
 
 def _add_ridge_line(pen: JwwDrawing, site: Site, area, roof_spec, span: float) -> None:
@@ -75,9 +75,9 @@ def _add_ridge_line(pen: JwwDrawing, site: Site, area, roof_spec, span: float) -
     half = span
     p1 = (px - ridge_dir[0] * half, py - ridge_dir[1] * half)
     p2 = (px + ridge_dir[0] * half, py + ridge_dir[1] * half)
-    pen.line(p1, p2, "MVE-RIDGE", LAYERS["MVE-RIDGE"])
+    pen.line(p1, p2, "MVCE-RIDGE", LAYERS["MVCE-RIDGE"])
     pen.text(f"棟 / {roof_spec.describe_ja()}", (px, py), span * 0.018,
-             "MVE-RIDGE", LAYERS["MVE-RIDGE"])
+             "MVCE-RIDGE", LAYERS["MVCE-RIDGE"])
 
 
 #: 書き出しの実装。`r12` は外部ライブラリを使わない最小構成（JW-CAD向け）。
@@ -118,35 +118,35 @@ def write_dxf(result: OptimizeResult, path: str, draw_mesh: bool = True,
     span = max(width, height)
 
     # 敷地
-    pen.polyline(site.points, "MVE-SITE", LAYERS["MVE-SITE"])
+    pen.polyline(site.points, "MVCE-SITE", LAYERS["MVCE-SITE"])
     # 道路
     for edge in site.edges:
         if edge.is_road:
-            pen.polyline(_road_polygon(site, edge), "MVE-ROAD", LAYERS["MVE-ROAD"])
+            pen.polyline(_road_polygon(site, edge), "MVCE-ROAD", LAYERS["MVCE-ROAD"])
             mid = edge.midpoint
             nx, ny = interior_normal(edge.p1, edge.p2)
             pen.text(
                 f"W={edge.road_width_m:.1f}m",
                 (mid[0] - nx * edge.road_width_m * 0.5,
                  mid[1] - ny * edge.road_width_m * 0.5),
-                span * 0.02, "MVE-ROAD", LAYERS["MVE-ROAD"],
+                span * 0.02, "MVCE-ROAD", LAYERS["MVCE-ROAD"],
             )
 
     # 壁面後退線・建物外郭線・メッシュ
     if result.area is not None:
         if result.area.setback_ring and any(e.wall_setback_m > 0 for e in site.edges):
-            pen.polyline(result.area.setback_ring, "MVE-SETBACK", LAYERS["MVE-SETBACK"])
-        pen.polyline(polygon_to_ring(result.area.outline), "MVE-OUTLINE",
-                     LAYERS["MVE-OUTLINE"])
+            pen.polyline(result.area.setback_ring, "MVCE-SETBACK", LAYERS["MVCE-SETBACK"])
+        pen.polyline(polygon_to_ring(result.area.outline), "MVCE-OUTLINE",
+                     LAYERS["MVCE-OUTLINE"])
         if draw_mesh:
             for cell in result.area.cells:
-                pen.polyline(cell.corners, "MVE-MESH", LAYERS["MVE-MESH"])
+                pen.polyline(cell.corners, "MVCE-MESH", LAYERS["MVCE-MESH"])
         if draw_floor_labels and result.floors.size:
             cell_size = min(result.area.cell_size_x_m, result.area.cell_size_y_m)
             for cell, floors in zip(result.area.cells, result.floors):
                 if floors > 0:
                     pen.text(str(int(floors)), cell.center, cell_size * 0.3,
-                             "MVE-FLOORS", LAYERS["MVE-FLOORS"])
+                             "MVCE-FLOORS", LAYERS["MVCE-FLOORS"])
 
     # 各階の平面輪郭
     by_level: dict[int, list] = {}
@@ -154,7 +154,7 @@ def write_dxf(result: OptimizeResult, path: str, draw_mesh: bool = True,
         level = int(round(block.z_bottom / site.floor_height_m))
         by_level.setdefault(level, []).append(block)
     for level, blocks in sorted(by_level.items()):
-        layer = f"MVE-PLAN-{level + 1}"
+        layer = f"MVCE-PLAN-{level + 1}"
         color = (level % 7) + 1
         pen.add_layer(layer, color)
         for block in blocks:
@@ -163,8 +163,8 @@ def write_dxf(result: OptimizeResult, path: str, draw_mesh: bool = True,
     # 日影の測定線
     if result.shadow_spec is not None:
         spec = result.shadow_spec
-        pen.polyline(regulation_boundary(site, spec), "MVE-SITE", 253)
-        for distance, layer in ((5.0, "MVE-SHADOW-5M"), (10.0, "MVE-SHADOW-10M")):
+        pen.polyline(regulation_boundary(site, spec), "MVCE-SITE", 253)
+        for distance, layer in ((5.0, "MVCE-SHADOW-5M"), (10.0, "MVCE-SHADOW-10M")):
             pen.polyline(measurement_points(site, spec, distance), layer, LAYERS[layer])
 
         # 等時間日影図（等時間日影線）。isochrone_hours が空なら何もしない。
@@ -175,7 +175,7 @@ def write_dxf(result: OptimizeResult, path: str, draw_mesh: bool = True,
             )
             iso_colors = (1, 2, 3, 4, 5, 6)
             for idx, level in enumerate(spec.isochrone_hours):
-                layer = f"MVE-ISOCHRONE-{level:g}H".replace(".", "_")
+                layer = f"MVCE-ISOCHRONE-{level:g}H".replace(".", "_")
                 color = iso_colors[idx % len(iso_colors)]
                 label = f"{level:g}時間"
                 for points, closed in iso.get(level, []):
@@ -193,6 +193,6 @@ def write_dxf(result: OptimizeResult, path: str, draw_mesh: bool = True,
     text_height = span * 0.022
     for i, line in enumerate(result.summary_lines_ja()):
         pen.text(line, (min(xs), min(ys) - span * 0.12 - i * text_height * 1.6),
-                 text_height, "MVE-SUMMARY", LAYERS["MVE-SUMMARY"])
+                 text_height, "MVCE-SUMMARY", LAYERS["MVCE-SUMMARY"])
 
     pen.save(path)

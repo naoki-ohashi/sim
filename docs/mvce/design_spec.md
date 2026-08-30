@@ -464,7 +464,7 @@ h_thresh(P, t, C) = mh + r・tan(α)
    動的に解決する。線分の端点をハッシュマップでつなぎポリライン化し、
    グリッド境界で途切れる場合は開いた線、内部で閉じる場合は閉じた線
    として返す。
-4. **出力**: DXFではレベルごとに `MVE-ISOCHRONE-{時間}H` レイヤに
+4. **出力**: DXFではレベルごとに `MVCE-ISOCHRONE-{時間}H` レイヤに
    ラベル付きで作図し（`drawing.py`）、3Dビューアにも同じ座標を重畳
    表示する（`viewer3d.py`）。等時間日影線はDXF・Python生成の3D HTMLの
    みで、ブラウザ版（JS）インタラクティブUIへの移植は対象外（4.6節）。
@@ -723,17 +723,17 @@ DXF読込の可否には影響しません。
 
 | レイヤ | 内容 |
 |---|---|
-| `MVE-SITE` | 敷地境界線・日影の規制境界線 |
-| `MVE-ROAD` | 前面道路（幅員ぶんの帯・幅員の文字） |
-| `MVE-SETBACK` | 壁面後退線 |
-| `MVE-OUTLINE` | 建物外郭線 |
-| `MVE-MESH` | メッシュの割り付け |
-| `MVE-FLOORS` | 各マスの階数（文字） |
-| `MVE-PLAN-n` | n階の平面輪郭 |
-| `MVE-SHADOW-5M` / `-10M` | 日影の測定線 |
-| `MVE-NORTH` | 真北記号 |
-| `MVE-RIDGE` | 逆日影（屋根越し・棟状パターン）の棟の位置 |
-| `MVE-SUMMARY` | 計算結果の要約（日本語） |
+| `MVCE-SITE` | 敷地境界線・日影の規制境界線 |
+| `MVCE-ROAD` | 前面道路（幅員ぶんの帯・幅員の文字） |
+| `MVCE-SETBACK` | 壁面後退線 |
+| `MVCE-OUTLINE` | 建物外郭線 |
+| `MVCE-MESH` | メッシュの割り付け |
+| `MVCE-FLOORS` | 各マスの階数（文字） |
+| `MVCE-PLAN-n` | n階の平面輪郭 |
+| `MVCE-SHADOW-5M` / `-10M` | 日影の測定線 |
+| `MVCE-NORTH` | 真北記号 |
+| `MVCE-RIDGE` | 逆日影（屋根越し・棟状パターン）の棟の位置 |
+| `MVCE-SUMMARY` | 計算結果の要約（日本語） |
 
 他のCAD向けには `--dxf-backend ezdxf` で ezdxf 版を選べます。
 

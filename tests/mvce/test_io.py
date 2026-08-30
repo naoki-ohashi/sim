@@ -127,8 +127,8 @@ def test_dxf_output_has_expected_layers(tmp_path):
 
     msp = ezdxf.readfile(str(path)).modelspace()
     layers = {e.dxf.layer for e in msp}
-    for expected in ("MVE-SITE", "MVE-ROAD", "MVE-OUTLINE", "MVE-MESH",
-                     "MVE-NORTH", "MVE-SUMMARY", "MVE-SHADOW-5M", "MVE-SHADOW-10M"):
+    for expected in ("MVCE-SITE", "MVCE-ROAD", "MVCE-OUTLINE", "MVCE-MESH",
+                     "MVCE-NORTH", "MVCE-SUMMARY", "MVCE-SHADOW-5M", "MVCE-SHADOW-10M"):
         assert expected in layers, expected
 
 
@@ -137,7 +137,7 @@ def test_dxf_draws_the_road_band(tmp_path):
     path = tmp_path / "out.dxf"
     write_dxf(result, str(path))
     msp = ezdxf.readfile(str(path)).modelspace()
-    roads = [e for e in msp if e.dxf.layer == "MVE-ROAD" and e.dxftype() == "LINE"]
+    roads = [e for e in msp if e.dxf.layer == "MVCE-ROAD" and e.dxftype() == "LINE"]
     assert roads
     # 6m 道路が敷地の外（y<0）に描かれている。図面はmmなので -6000。
     ys = [v for e in roads for v in (e.dxf.start.y, e.dxf.end.y)]
@@ -153,7 +153,7 @@ def test_dxf_floor_labels_can_be_disabled(tmp_path):
 
     def count(path):
         return sum(1 for e in ezdxf.readfile(str(path)).modelspace()
-                   if e.dxf.layer == "MVE-FLOORS")
+                   if e.dxf.layer == "MVCE-FLOORS")
 
     assert count(with_labels) > 0
     assert count(without) == 0
@@ -164,7 +164,7 @@ def test_dxf_has_one_layer_per_floor(tmp_path):
     path = tmp_path / "out.dxf"
     write_dxf(result, str(path))
     msp = ezdxf.readfile(str(path)).modelspace()
-    plan_layers = {e.dxf.layer for e in msp if e.dxf.layer.startswith("MVE-PLAN-")}
+    plan_layers = {e.dxf.layer for e in msp if e.dxf.layer.startswith("MVCE-PLAN-")}
     assert len(plan_layers) == int(result.floors.max())
 
 
@@ -319,8 +319,8 @@ def test_dxf_draws_the_ridge_line_when_roof_pattern_is_used(tmp_path):
     write_dxf(result, str(path))
 
     msp = ezdxf.readfile(str(path)).modelspace()
-    ridge_lines = [e for e in msp if e.dxftype() == "LINE" and e.dxf.layer == "MVE-RIDGE"]
-    ridge_texts = [e for e in msp if e.dxftype() == "TEXT" and e.dxf.layer == "MVE-RIDGE"]
+    ridge_lines = [e for e in msp if e.dxftype() == "LINE" and e.dxf.layer == "MVCE-RIDGE"]
+    ridge_texts = [e for e in msp if e.dxftype() == "TEXT" and e.dxf.layer == "MVCE-RIDGE"]
     assert ridge_lines and ridge_texts
 
 
@@ -338,7 +338,7 @@ def test_dxf_has_no_ridge_line_for_voxel_family(tmp_path):
     path = tmp_path / "out.dxf"
     write_dxf(result, str(path))
     msp = ezdxf.readfile(str(path)).modelspace()
-    assert not [e for e in msp if e.dxf.layer == "MVE-RIDGE"]
+    assert not [e for e in msp if e.dxf.layer == "MVCE-RIDGE"]
 
 
 # === 逆日影パターン（envelope_family）の設定・CLI ==========================

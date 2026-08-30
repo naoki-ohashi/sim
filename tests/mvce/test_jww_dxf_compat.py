@@ -34,7 +34,7 @@ def test_only_lines_and_text(dxf):
 def test_coordinates_are_millimetres(dxf):
     """JWWはmmで作図する。mのまま渡すと1/1000の大きさになり見えない。"""
     msp = ezdxf.readfile(str(dxf)).modelspace()
-    site = [e for e in msp if e.dxftype() == "LINE" and e.dxf.layer == "MVE-SITE"]
+    site = [e for e in msp if e.dxftype() == "LINE" and e.dxf.layer == "MVCE-SITE"]
     xs = [v for e in site for v in (e.dxf.start.x, e.dxf.end.x)]
     # サンプル敷地は間口30m → 30000mm
     assert max(xs) - min(xs) == pytest.approx(30000.0)
@@ -62,7 +62,7 @@ def test_units_can_be_overridden_for_metre_drawings(tmp_path):
     path = tmp_path / "m.dxf"
     write_dxf(_result(), str(path), units_per_meter=1.0)
     msp = ezdxf.readfile(str(path)).modelspace()
-    site = [e for e in msp if e.dxftype() == "LINE" and e.dxf.layer == "MVE-SITE"]
+    site = [e for e in msp if e.dxftype() == "LINE" and e.dxf.layer == "MVCE-SITE"]
     xs = [v for e in site for v in (e.dxf.start.x, e.dxf.end.x)]
     assert max(xs) - min(xs) == pytest.approx(30.0)
 
@@ -70,7 +70,7 @@ def test_units_can_be_overridden_for_metre_drawings(tmp_path):
 def test_closed_shapes_are_actually_closed(dxf):
     """折れ線をLINEに分解しても、閉じた形は閉じたままであること。"""
     msp = ezdxf.readfile(str(dxf)).modelspace()
-    site = [e for e in msp if e.dxftype() == "LINE" and e.dxf.layer == "MVE-SITE"]
+    site = [e for e in msp if e.dxftype() == "LINE" and e.dxf.layer == "MVCE-SITE"]
     # 各頂点はちょうど2本の線に共有される＝閉じている
     counts: dict[tuple[float, float], int] = {}
     for e in site:
@@ -182,10 +182,10 @@ def test_r12_layer_names_are_uppercase_and_valid(tmp_path):
     from mvce.io.dxf_r12 import R12Drawing
 
     pen = R12Drawing()
-    pen.line((0, 0), (1, 1), "mve-plan-1")
+    pen.line((0, 0), (1, 1), "mvce-plan-1")
     pen.line((0, 0), (1, 1), "変な/名前*です")
     names = [n for n in pen._layers]
-    assert "MVE-PLAN-1" in names
+    assert "MVCE-PLAN-1" in names
     assert all(len(n) <= 31 for n in names)
     assert all(c.isalnum() or c in "$-_" for n in names for c in n)
 

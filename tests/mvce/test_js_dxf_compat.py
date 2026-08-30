@@ -47,7 +47,7 @@ def dxf(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def dxf_no_shadow(tmp_path_factory):
-    """日影規制なしの敷地（MVE-SITEレイヤに、みなし境界線の重複が乗らない）。"""
+    """日影規制なしの敷地（MVCE-SITEレイヤに、みなし境界線の重複が乗らない）。"""
     tmp_path = tmp_path_factory.mktemp("js_dxf_no_shadow")
     payload = {
         "site": _js_site(_site()),
@@ -67,7 +67,7 @@ def test_only_lines_and_text(dxf):
 
 def test_coordinates_are_millimetres(dxf):
     msp = ezdxf.readfile(str(dxf)).modelspace()
-    site = [e for e in msp if e.dxftype() == "LINE" and e.dxf.layer == "MVE-SITE"]
+    site = [e for e in msp if e.dxftype() == "LINE" and e.dxf.layer == "MVCE-SITE"]
     xs = [v for e in site for v in (e.dxf.start.x, e.dxf.end.x)]
     # SQUARE敷地は間口30m → 30000mm
     assert max(xs) - min(xs) == pytest.approx(30000.0)
@@ -82,11 +82,11 @@ def test_japanese_text_is_shift_jis(dxf):
 
 
 def test_closed_shapes_are_actually_closed(dxf_no_shadow):
-    """日影のみなし境界線が同じMVE-SITEレイヤに重ねて描かれるため、
+    """日影のみなし境界線が同じMVCE-SITEレイヤに重ねて描かれるため、
     このテストは日影規制なしの図面で確認する（Python版と同じ前提）。
     """
     msp = ezdxf.readfile(str(dxf_no_shadow)).modelspace()
-    site = [e for e in msp if e.dxftype() == "LINE" and e.dxf.layer == "MVE-SITE"]
+    site = [e for e in msp if e.dxftype() == "LINE" and e.dxf.layer == "MVCE-SITE"]
     counts: dict[tuple[float, float], int] = {}
     for e in site:
         for p in (e.dxf.start, e.dxf.end):
@@ -112,8 +112,8 @@ def test_extents_describe_the_drawing(dxf):
 
 def test_layer_names_are_uppercase_and_valid(dxf):
     names = [layer.dxf.name for layer in ezdxf.readfile(str(dxf)).layers]
-    assert "MVE-ISOCHRONE-2H" in names
-    assert "MVE-ISOCHRONE-3H" in names
+    assert "MVCE-ISOCHRONE-2H" in names
+    assert "MVCE-ISOCHRONE-3H" in names
     assert all(len(n) <= 31 for n in names)
     assert all(c.isalnum() or c in "$-_" for n in names for c in n)
 
@@ -125,7 +125,7 @@ def test_units_can_be_overridden_for_metre_drawings(tmp_path):
               "unitsPerMeter": 1.0}
     path = _build_dxf(tmp_path, payload, "m.dxf")
     msp = ezdxf.readfile(str(path)).modelspace()
-    site_lines = [e for e in msp if e.dxftype() == "LINE" and e.dxf.layer == "MVE-SITE"]
+    site_lines = [e for e in msp if e.dxftype() == "LINE" and e.dxf.layer == "MVCE-SITE"]
     xs = [v for e in site_lines for v in (e.dxf.start.x, e.dxf.end.x)]
     assert max(xs) - min(xs) == pytest.approx(30.0)
 

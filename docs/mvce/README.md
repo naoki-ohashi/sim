@@ -152,7 +152,7 @@ lean_to を含む一般形）は、代わりに**1〜2枚の勾配面で規則�
 - 容積は自由形（voxel）以下になります（`ridge` は `lean_to` を含む一般形なので
   `lean_to` 以上、`voxel` 以下）。
 - 棟の向きを固定したい場合は `roof_fixed_low_azimuth_deg` を指定します。
-- DXFには棟（稜線）の位置が `MVE-RIDGE` レイヤに描かれます。
+- DXFには棟（稜線）の位置が `MVCE-RIDGE` レイヤに描かれます。
 
 ### メッシュ
 
@@ -196,17 +196,17 @@ mesh:
 
 | レイヤ | 内容 |
 |---|---|
-| `MVE-SITE` | 敷地境界線 |
-| `MVE-ROAD` | 前面道路（幅員ぶんの帯・幅員の文字） |
-| `MVE-SETBACK` | 壁面後退線 |
-| `MVE-OUTLINE` | 建物外郭線 |
-| `MVE-MESH` | メッシュの割り付け |
-| `MVE-FLOORS` | 各マスの階数 |
-| `MVE-PLAN-n` | n階の平面輪郭 |
-| `MVE-SHADOW-5M` / `-10M` | 日影の測定線 |
-| `MVE-NORTH` | 真北記号 |
-| `MVE-RIDGE` | 逆日影（屋根越し・棟状パターン）の棟の位置 |
-| `MVE-SUMMARY` | 計算結果の要約 |
+| `MVCE-SITE` | 敷地境界線 |
+| `MVCE-ROAD` | 前面道路（幅員ぶんの帯・幅員の文字） |
+| `MVCE-SETBACK` | 壁面後退線 |
+| `MVCE-OUTLINE` | 建物外郭線 |
+| `MVCE-MESH` | メッシュの割り付け |
+| `MVCE-FLOORS` | 各マスの階数 |
+| `MVCE-PLAN-n` | n階の平面輪郭 |
+| `MVCE-SHADOW-5M` / `-10M` | 日影の測定線 |
+| `MVCE-NORTH` | 真北記号 |
+| `MVCE-RIDGE` | 逆日影（屋根越し・棟状パターン）の棟の位置 |
+| `MVCE-SUMMARY` | 計算結果の要約 |
 
 JWWが読める形式で書き出します（**DXF R12・LINEとTEXTのみ・mm**）。JWWの
 DXF読込は古い仕様しか受け付けず、これを外すと読み込みは成功したように
