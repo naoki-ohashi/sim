@@ -58,6 +58,8 @@ def _js_site(site):
                 "roadWidthM": e.road_width_m, "wallSetbackM": e.wall_setback_m,
                 "groundLevelDiffM": e.ground_level_diff_m,
                 "relaxation": {"kind": e.relaxation.kind.value, "widthM": e.relaxation.width_m},
+                "specifiedRoad": {"widthM": e.specified_road.width_m,
+                                  "distanceM": e.specified_road.distance_m},
             }
             for e in site.edges
         ],
@@ -118,6 +120,29 @@ def test_far_matches(zone, far, width):
     specs = [{"kind": "road", "road_width_m": width}, {"kind": "adjacent"},
              {"kind": "adjacent"}, {"kind": "adjacent"}]
     site = _site(specs, zone=zone, far=far)
+    js = _run_js({"want": ["far"], "site": _js_site(site)})["far"]
+    py = compute_far(site)
+    assert js["effective"] == pytest.approx(py.effective_far)
+    assert js["maxRoadWidthM"] == pytest.approx(py.max_road_width_m)
+    if py.road_far is None:
+        assert js["roadFar"] is None
+    else:
+        assert js["roadFar"] == pytest.approx(py.road_far)
+
+
+@pytest.mark.parametrize("front,spec_w,dist", [
+    (6.0, 15.0, 0.0),      # L=0 → Wa=6.0（加算後ちょうど12mで2項が外れる）
+    (6.0, 15.0, 35.0),     # Wa=3.0
+    (8.0, 20.0, 20.0),     # Wa=(12-8)*(70-20)/70
+    (6.0, 12.0, 10.0),     # 特定道路が15m未満 → 加算なし
+    (6.0, 15.0, 80.0),     # 70m超 → 加算なし
+    (4.0, 15.0, 10.0),     # 前面道路が6m未満 → 加算なし
+])
+def test_far_specified_road_matches(front, spec_w, dist):
+    specs = [{"kind": "road", "road_width_m": front,
+              "specified_road": {"width_m": spec_w, "distance_m": dist}},
+             {"kind": "adjacent"}, {"kind": "adjacent"}, {"kind": "adjacent"}]
+    site = _site(specs, zone="1res", far=4.0)
     js = _run_js({"want": ["far"], "site": _js_site(site)})["far"]
     py = compute_far(site)
     assert js["effective"] == pytest.approx(py.effective_far)

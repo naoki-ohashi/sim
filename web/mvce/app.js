@@ -64,6 +64,12 @@
         <div class="row road-only"><label>道路の幅員</label>
           <input type="number" data-f="roadWidth" value="${prev.roadWidth != null ? prev.roadWidth : 6}"
                  min="0.5" step="0.5" style="width:80px"><span class="unit">m</span></div>
+        <div class="row road-only"><label title="法52条9項の特定道路。この前面道路が接続している幅員15m以上の道路の幅員。0なら緩和を見込みません">特定道路の幅員</label>
+          <input type="number" data-f="specRoadWidth" value="${prev.specRoadWidth != null ? prev.specRoadWidth : 0}"
+                 min="0" step="0.5" style="width:80px"><span class="unit">m</span></div>
+        <div class="row road-only"><label title="令135条の18 の L。特定道路から、敷地が接する前面道路の部分の直近の端までの延長。70m以内でないと効きません">特定道路からの延長</label>
+          <input type="number" data-f="specRoadDist" value="${prev.specRoadDist != null ? prev.specRoadDist : 0}"
+                 min="0" step="1" style="width:80px"><span class="unit">m</span></div>
         <div class="row"><label>壁面後退</label>
           <input type="number" data-f="setback" value="${prev.setback != null ? prev.setback : ''}"
                  placeholder="既定" min="0" step="0.5" style="width:80px"><span class="unit">m</span></div>
@@ -94,7 +100,9 @@
   function updateEdgeVisibility(div) {
     const kind = div.querySelector('[data-f=kind]').value;
     const relax = div.querySelector('[data-f=relaxKind]').value;
-    div.querySelector('.road-only').style.display = kind === 'road' ? '' : 'none';
+    div.querySelectorAll('.road-only').forEach(el => {
+      el.style.display = kind === 'road' ? '' : 'none';
+    });
     div.querySelector('.relax-only').style.display = relax === 'none' ? 'none' : '';
   }
 
@@ -107,6 +115,8 @@
         setback: get('setback').value === '' ? null : parseFloat(get('setback').value),
         relaxKind: get('relaxKind').value,
         relaxWidth: parseFloat(get('relaxWidth').value),
+        specRoadWidth: parseFloat(get('specRoadWidth').value) || 0,
+        specRoadDist: parseFloat(get('specRoadDist').value) || 0,
         levelDiff: parseFloat(get('levelDiff').value) || 0,
       };
     });
@@ -128,6 +138,10 @@
         wallSetbackM: s.setback != null && Number.isFinite(s.setback) ? s.setback : defaultSetback,
         groundLevelDiffM: s.levelDiff || 0,
         relaxation: { kind: relaxKind, widthM: relaxKind === 'none' ? 0 : (s.relaxWidth || 0) },
+        // 法52条9項の特定道路。容積率（法52条2項〜7項）だけに効く
+        specifiedRoad: s.kind === 'road'
+          ? { widthM: s.specRoadWidth || 0, distanceM: s.specRoadDist || 0 }
+          : { widthM: 0, distanceM: 0 },
       };
     });
 
@@ -448,6 +462,10 @@
         out.push('      relaxation:', `        kind: ${e.relaxation.kind}`,
                  `        width_m: ${e.relaxation.widthM}`);
       }
+      if (e.specifiedRoad && e.specifiedRoad.widthM > 0) {
+        out.push('      specified_road:', `        width_m: ${e.specifiedRoad.widthM}`,
+                 `        distance_m: ${e.specifiedRoad.distanceM}`);
+      }
     }
     out.push('  zoning:',
       `    zone_type: ${z.zoneType}`,
@@ -548,10 +566,14 @@
       if (rw) get('roadWidth').value = rw[1];
       const sb = block.match(/wall_setback_m:\s*([\d.]+)/);
       if (sb) get('setback').value = sb[1];
-      const rk = block.match(/relaxation:\s*\n\s*kind:\s*(\w+)/);
-      if (rk) get('relaxKind').value = rk[1];
-      const rwid = block.match(/width_m:\s*([\d.]+)/);
-      if (rwid) get('relaxWidth').value = rwid[1];
+      // relaxation の width_m は kind とセットで読む。単独の /width_m:/ だと
+      // road_width_m にも当たってしまう
+      const rk = block.match(/relaxation:\s*\n\s*kind:\s*(\w+)\s*\n\s*width_m:\s*([\d.]+)/);
+      if (rk) { get('relaxKind').value = rk[1]; get('relaxWidth').value = rk[2]; }
+      // 法52条9項の特定道路
+      const sr = block.match(/specified_road:\s*\n\s*width_m:\s*([\d.]+)\s*\n\s*distance_m:\s*([\d.]+)/);
+      get('specRoadWidth').value = sr ? sr[1] : 0;
+      get('specRoadDist').value = sr ? sr[2] : 0;
       const ld = block.match(/ground_level_diff_m:\s*(-?[\d.]+)/);
       if (ld) get('levelDiff').value = ld[1];
       updateEdgeVisibility(div);

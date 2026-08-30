@@ -79,6 +79,50 @@ class Relaxation:
 
 
 @dataclass
+class SpecifiedRoad:
+    """法52条9項の**特定道路**。前面道路がそこに接続しているときに置きます。
+
+        ９　建築物の敷地が、幅員十五メートル以上の道路（以下この項において
+        「特定道路」という。）に接続する幅員六メートル以上十二メートル未満の
+        前面道路のうち当該特定道路からの延長が七十メートル以内の部分において
+        接する場合における当該建築物に対する第二項から第七項までの規定の
+        適用については、第二項中「幅員」とあるのは、「幅員（…その幅員に、
+        当該特定道路から当該建築物の敷地が接する当該前面道路の部分までの
+        延長に応じて政令で定める数値を加えたもの）」とする。
+
+    加算値は令135条の18 の `Wa＝（12−Wr）（70−L）／70`。
+
+    - `width_m` … 特定道路自体の幅員。**15m以上**でないと適用されません。
+      条件を engine 側で確かめるために必須にしています（利用者が
+      「特定道路がある」と申告しただけでは適用しません）。
+    - `distance_m` … 令135条の18 の **L**。特定道路から、敷地が接している
+      前面道路の部分の**直近の端**までの延長。**70m以内**でないと適用外。
+
+    **敷地ポリゴンからは導けない情報です。** 特定道路がどこにあるかは
+    敷地の外の話なので、都市計画図・道路台帳で調べて入れてください。
+    """
+
+    width_m: float = 0.0
+    distance_m: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.width_m < 0:
+            raise ValueError("特定道路の width_m は0以上である必要があります")
+        if self.distance_m < 0:
+            raise ValueError("特定道路までの distance_m は0以上である必要があります")
+        if self.distance_m > 0 and self.width_m <= 0:
+            raise ValueError(
+                "特定道路の distance_m を指定する場合は width_m（特定道路の幅員）も"
+                "必要です。15m以上かどうかを確かめられないため既定値では補いません。"
+            )
+
+    @property
+    def declared(self) -> bool:
+        """利用者が特定道路を申告しているか（条件を満たすかは別問題）。"""
+        return self.width_m > 0
+
+
+@dataclass
 class Boundary:
     """敷地の1辺と、その規制上の役割。
 
@@ -98,6 +142,9 @@ class Boundary:
       特例に当たる部分を除いた「実際の最小後退距離」を渡す必要があります。
     - `relaxation` … 境界線の外側（道路なら道路の反対側）にある公園・
       水面・線路敷
+    - `specified_road` … 法52条9項の特定道路（この前面道路が幅員15m以上の
+      道路に接続しているとき）。**容積率（法52条2項〜7項）にだけ**効き、
+      斜線制限（令132条）の幅員は変わりません
     - `ground_level_diff_m` … 辺の外側（道路なら路面、隣地なら隣地の地盤面）が
       敷地の地盤面より何メートル高いか。**符号つき**です。
 
@@ -126,6 +173,7 @@ class Boundary:
     road_width_m: float = 0.0
     wall_setback_m: float = 0.0
     relaxation: Relaxation = field(default_factory=Relaxation)
+    specified_road: SpecifiedRoad = field(default_factory=SpecifiedRoad)
     ground_level_diff_m: float = 0.0
     label: str = ""
 
@@ -135,6 +183,10 @@ class Boundary:
             raise ValueError("道路境界線には road_width_m > 0 が必要です")
         if self.wall_setback_m < 0:
             raise ValueError("wall_setback_m は0以上である必要があります")
+        if self.specified_road.declared and self.kind != BoundaryKind.ROAD:
+            raise ValueError(
+                "specified_road（法52条9項）は道路境界線にだけ指定できます"
+            )
 
     @property
     def is_road(self) -> bool:
@@ -207,7 +259,13 @@ class Site:
 
     @property
     def max_road_width_m(self) -> float:
-        """前面道路のうち最大の幅員（法52条2項・令132条で使う）。"""
+        """前面道路のうち最大の**実**幅員（令132条・令134条で使う）。
+
+        **法52条9項（特定道路）の加算は入っていません。** あの読み替えは
+        「第二項から第七項までの規定の適用については」と範囲が限られていて、
+        斜線制限（法56条・令132条）には及びません。容積率側の幅員は
+        `far.far_road_width_m()` を使ってください。
+        """
         return max((e.road_width_m for e in self.road_edges), default=0.0)
 
     def max_building_area_m2(self) -> float:
@@ -261,7 +319,18 @@ class Site:
                     kind=RelaxationKind(relax.get("kind", "none")),
                     width_m=float(relax.get("width_m", 0.0)),
                 )
-            edges.append(Boundary(p1=p1, p2=p2, relaxation=relax or Relaxation(), **data))
+            spec_road = data.pop("specified_road", None)
+            if isinstance(spec_road, dict):
+                spec_road = SpecifiedRoad(
+                    width_m=float(spec_road.get("width_m", 0.0)),
+                    distance_m=float(spec_road.get("distance_m", 0.0)),
+                )
+            edges.append(Boundary(
+                p1=p1, p2=p2,
+                relaxation=relax or Relaxation(),
+                specified_road=spec_road or SpecifiedRoad(),
+                **data,
+            ))
         return cls(
             points=pts, edges=edges, zoning=zoning,
             north=north or NorthReference(), floor_height_m=floor_height_m, name=name,

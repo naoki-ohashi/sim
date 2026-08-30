@@ -6,7 +6,7 @@
  * Python版との対応:
  *   geometry.js 相当        → 幾何ユーティリティ
  *   mvce/zoning.py           → ZONING（用途地域テーブル）
- *   mvce/far.py              → computeFar（法52条2項）
+ *   mvce/far.py              → computeFar（法52条2項・9項＋令135条の18）
  *   mvce/regulations/*.py    → heightLimitAt ほか（斜線制限と緩和）
  *   mvce/mesh.py             → buildMesh
  *   mvce/index/shadow_index.py     → buildShadowIndex（しきい値高さ）
@@ -289,22 +289,82 @@
   // 合わせるときは spec.parkIsDeemedBoundary = true。
   const SHADOW_RELAX = new Set(['water', 'railway']);
 
-  // ===== 法52条2項 ====================================================
+  // ===== 法52条2項・9項 ================================================
+  // maxRoadWidth は**実幅員**。令132条・令134条（斜線）はこちらを使う。
+  // 法52条9項の読み替えは「第二項から第七項まで」に限られるので、容積率
+  // 側の幅員は farRoadWidthM() を使うこと。
   function maxRoadWidth(site) {
     return site.edges.reduce((m, e) => (e.kind === 'road' ? Math.max(m, e.roadWidthM) : m), 0);
   }
 
+  // 法52条9項の特定道路
+  const SPECIFIED_ROAD_MIN_WIDTH_M = 15.0;
+  const SPECIFIED_ROAD_FRONT_MIN_M = 6.0;
+  const SPECIFIED_ROAD_FRONT_MAX_M = 12.0;
+  const SPECIFIED_ROAD_MAX_DISTANCE_M = 70.0;
+
+  // 令135条の18: Wa =（12 − Wr）（70 − L）/ 70
+  function article13518Addition(frontWidthM, distanceM) {
+    return (SPECIFIED_ROAD_FRONT_MAX_M - frontWidthM)
+      * (SPECIFIED_ROAD_MAX_DISTANCE_M - distanceM) / SPECIFIED_ROAD_MAX_DISTANCE_M;
+  }
+
+  // 1本の前面道路について、法52条2項に使う幅員（9項の読み替え後）
+  function roadFarWidth(edge) {
+    const wr = edge.roadWidthM;
+    const spec = edge.specifiedRoad;
+    const declared = spec && spec.widthM > 0;
+    if (!declared) return { actualWidthM: wr, additionM: 0, widthM: wr, reason: '' };
+    const no = reason => ({ actualWidthM: wr, additionM: 0, widthM: wr, reason });
+    if (spec.widthM < SPECIFIED_ROAD_MIN_WIDTH_M) {
+      return no(`特定道路の幅員が${spec.widthM.toFixed(1)}mで15m未満のため、法52条9項の特定道路にあたりません。`);
+    }
+    if (wr < SPECIFIED_ROAD_FRONT_MIN_M) {
+      return no(`前面道路の幅員が${wr.toFixed(1)}mで6m未満のため、法52条9項の対象外です。`);
+    }
+    if (wr >= SPECIFIED_ROAD_FRONT_MAX_M) {
+      return no(`前面道路の幅員が${wr.toFixed(1)}mで12m以上のため、そもそも法52条2項の低減を受けません。`);
+    }
+    const l = spec.distanceM || 0;
+    if (l > SPECIFIED_ROAD_MAX_DISTANCE_M) {
+      return no(`特定道路からの延長が${l.toFixed(1)}mで70mを超えるため、法52条9項の対象外です。`);
+    }
+    const add = article13518Addition(wr, l);
+    return { actualWidthM: wr, additionM: add, widthM: wr + add, reason: '' };
+  }
+
+  function farRoadWidthM(site) {
+    return site.edges.reduce(
+      (m, e) => (e.kind === 'road' ? Math.max(m, roadFarWidth(e).widthM) : m), 0);
+  }
+
   function computeFar(site) {
     const designated = site.zoning.farRatio;
-    const width = maxRoadWidth(site);
     const notes = [];
+    const additions = {};
+    site.edges.forEach((e, i) => {
+      if (e.kind !== 'road' || !e.specifiedRoad || !(e.specifiedRoad.widthM > 0)) return;
+      const w = roadFarWidth(e);
+      const l = e.specifiedRoad.distanceM || 0;
+      if (w.additionM > 0) {
+        additions[i] = w;
+        notes.push(`法52条9項・令135条の18: 辺${i}（幅員${w.actualWidthM.toFixed(1)}m）は幅員${e.specifiedRoad.widthM.toFixed(1)}mの特定道路から${l.toFixed(1)}mの位置にあるため、Wa=(12−${w.actualWidthM.toFixed(1)})×(70−${l.toFixed(1)})/70=${w.additionM.toFixed(2)}m を加算して${w.widthM.toFixed(2)}mとみなします。`);
+      } else if (w.reason) {
+        notes.push(`法52条9項: 辺${i}は加算しません。${w.reason}`);
+      }
+    });
+    const hasAdditions = Object.keys(additions).length > 0;
+    if (hasAdditions) {
+      notes.push('この加算は法52条2項〜7項（容積率）だけに効きます。道路斜線（令132条・令134条）の幅員は実幅員のままです。');
+    }
+    const width = farRoadWidthM(site);
     if (width <= 0) {
       notes.push('前面道路が設定されていません。法52条2項の判定ができないため指定容積率をそのまま使っています。');
-      return { designated, roadFar: null, effective: designated, maxRoadWidthM: 0, notes };
+      return { designated, roadFar: null, effective: designated, maxRoadWidthM: 0, notes, specifiedRoadAdditions: additions };
     }
     if (width >= FAR_ROAD_WIDTH_THRESHOLD_M) {
       notes.push(`前面道路の最大幅員が${width.toFixed(1)}mで12m以上のため、法52条2項による低減はありません。`);
-      return { designated, roadFar: null, effective: designated, maxRoadWidthM: width, notes };
+      return { designated, roadFar: null, effective: designated, maxRoadWidthM: width, notes, specifiedRoadAdditions: additions };
     }
     const coefficient = FAR_ROAD_COEFFICIENT[zoneGroup(site.zoning.zoneType)];
     const roadFar = width * coefficient;
@@ -313,8 +373,11 @@
     if (roadFar < designated) notes.push(`→ 前面道路幅員により容積率が ${(effective * 100).toFixed(0)}% に制限されます。`);
     const roadCount = site.edges.filter(e => e.kind === 'road').length;
     if (roadCount > 1) notes.push(`前面道路が${roadCount}本あるため、最大幅員${width.toFixed(1)}mで判定しています。`);
-    notes.push('特定道路による緩和（法52条9項）や特定行政庁が定める割増は未対応です。該当する可能性がある場合は別途確認してください。');
-    return { designated, roadFar, effective, maxRoadWidthM: width, notes };
+    if (!hasAdditions) {
+      notes.push('特定道路による緩和（法52条9項）は、特定道路を指定した辺がないため見ていません。幅員15m以上の道路に接続する前面道路（6m以上12m未満）に接している敷地では、その辺に特定道路の幅員と延長を入れてください。');
+    }
+    notes.push('特定行政庁が定める割増（法52条2項各号の指定区域）や、法52条8項・10項〜14項は未対応です。該当する可能性がある場合は別途確認してください。');
+    return { designated, roadFar, effective, maxRoadWidthM: width, notes, specifiedRoadAdditions: additions };
   }
 
   const siteArea = site => polygonArea(site.points);
@@ -1028,6 +1091,7 @@
     zoneGroup, roadSlantRow, roadSlantTier, adjacentSlantItem, adjacentSlantParams,
     northSlantParams,
     computeFar, siteArea, maxBuildingArea, maxFloorArea, maxRoadWidth,
+    farRoadWidthM, roadFarWidth, article13518Addition,
     appliedRoadWidth, roadHeightLimit, oppositeBoundaryLine, oppositeBoundaryLines,
     adjacentHeightLimit, northHeightLimit,
     northEdgeIndices, heightLimitAt,
