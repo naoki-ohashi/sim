@@ -18,7 +18,7 @@ from ..massing import Block
 from ..solvers.optimizer import OptimizeResult
 from ..regulations import road_slant
 from ..regulations.shadow import measurement_points
-from ..regulations.sky_ratio import reference_building
+from ..regulations.sky_ratio import slant_envelope
 from .dxf_pen import ensure_parent_dir
 
 
@@ -170,7 +170,9 @@ def build_html(
         for x, y in site.points
     ]
 
-    envelope = reference_building(site, n_layers=16)
+    # 斜線制限すべてを合成した包絡形（見せるためのもの）。
+    # 天空率の適合建築物とは別物（令135条の6・7・8 は規制ごとに別の形）。
+    envelope = slant_envelope(site, n_layers=16)
     top = max((b.z_top for b in envelope), default=10.0)
     span = max(max(xs) - min(xs), max(ys) - min(ys), top)
 

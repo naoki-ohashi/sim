@@ -20,11 +20,13 @@ from mvce.regulations import road_slant
 from mvce.regulations.height_field import height_limit_at, required_setback_for_height
 from mvce.regulations.shadow import ShadowRegulationSpec, deemed_boundary_offsets
 from mvce.regulations.sky_ratio import (
+    _reference_top_m,
     azimuths_deg,
     measurement_points,
     reference_building,
     sky_ratio_percent,
 )
+from mvce.zoning import UndeterminedRegulation
 from mvce.index.shadow_index import grid_shadow_hours
 from mvce.site import Site
 from mvce.solar import day_of_year, solar_declination_deg, solar_position_deg
@@ -397,10 +399,31 @@ def test_sky_measurement_points_follow_the_statutory_intervals():
     assert len(road) == 11
 
 
-def test_reference_building_layer_count_matches():
+def test_reference_buildings_match():
+    """規制ごとの適合建築物（令135条の6・7・8）が Python 版と一致する。
+
+    層の数だけでなく**頂部の高さ**も比べます。頂部は二分探索で求めるので、
+    片方だけ範囲の切り方を間違えるとここで出ます。
+    """
     site = _site(_ASYMMETRIC_SPECS, far=4.0)
     js = _run_js({"want": ["sky"], "site": _js_site(site), "skyNLayers": 16})["sky"]
-    assert js["referenceLayerCount"] == len(reference_building(site, n_layers=16))
+    for kind in ("road", "adjacent", "north"):
+        assert js["referenceLayerCounts"][kind] == len(
+            reference_building(site, kind, n_layers=16)), kind
+        assert js["referenceTops"][kind] == pytest.approx(
+            _reference_top_m(site, kind), abs=1e-6), kind
+
+
+def test_sky_reference_refuses_two_roads_on_both_sides():
+    """令135条の6第3項の区域ごとの比較は未対応。Python も JS も止まる。"""
+    specs = [{"kind": "road", "road_width_m": 6.0},
+             {"kind": "road", "road_width_m": 8.0},
+             {"kind": "adjacent"}, {"kind": "adjacent"}]
+    site = _site(specs, far=4.0)
+    with pytest.raises(UndeterminedRegulation):
+        reference_building(site, "road")
+    with pytest.raises(AssertionError, match="前面道路が2本"):
+        _run_js({"want": ["sky"], "site": _js_site(site)})
 
 
 def test_required_setback_for_height_matches():
@@ -414,16 +437,17 @@ def test_required_setback_for_height_matches():
         assert js_value == pytest.approx(py_value, abs=1e-9), case
 
 
-def test_sky_ratio_percent_matches():
+@pytest.mark.parametrize("kind", ["road", "adjacent", "north"])
+def test_sky_ratio_percent_matches(kind):
     site = _site(_ASYMMETRIC_SPECS, far=4.0)
-    cases = [{"point3": [15, 0, 4]}, {"point3": [0, 10, 4]}, {"point3": [30, 10, 4]},
-             {"point3": [15, 20, 4]}]
+    cases = [{"point3": [15, -6, 0], "kind": kind}, {"point3": [46, 10, 0], "kind": kind},
+             {"point3": [15, 24, 0], "kind": kind}, {"point3": [-16, 10, 0], "kind": kind}]
     js = _run_js({"want": ["sky"], "site": _js_site(site), "skyRatioCases": cases,
                   "skyNLayers": 20})["sky"]
-    reference = reference_building(site, n_layers=20)
+    reference = reference_building(site, kind, n_layers=20)
     for case, js_value in zip(cases, js["skyRatios"]):
         py_value = sky_ratio_percent(tuple(case["point3"]), reference, 72, 0.5)
-        assert js_value == pytest.approx(py_value, rel=1e-9), case
+        assert js_value == pytest.approx(py_value, rel=1e-9), (kind, case)
 
 
 def _sky_options(cell, extra=None):

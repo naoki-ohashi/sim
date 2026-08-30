@@ -56,7 +56,8 @@ from ..mesh import BuildableArea
 from ..regulations.sky_ratio import (
     azimuths_deg,
     measurement_points,
-    reference_building,
+    applicable_region,
+    reference_buildings,
     sky_ratio_percent,
 )
 from .shadow_index import _ray_entry_distances
@@ -183,7 +184,7 @@ def build_sky_index(
     area: BuildableArea,
     max_interval_m: float | None = None,
     n_azimuth: int = DEFAULT_N_AZIMUTH,
-    reference: list[Block] | None = None,
+    references: dict[str, list[Block]] | None = None,
     azimuth_offset_ratio: float = AZIMUTH_OFFSET_RATIO,
 ) -> SkyIndex:
     """入射距離のインデックスを作り、適合建築物の天空率を求める。"""
@@ -191,8 +192,8 @@ def build_sky_index(
         [list(cell.polygon.bounds) for cell in area.cells], dtype=float
     ).reshape(-1, 4)
 
-    if reference is None:
-        reference = reference_building(site)
+    if references is None:
+        references = reference_buildings(site)
 
     samples = measurement_points(site, max_interval_m)
     points = [s.point for s in samples]
@@ -204,6 +205,20 @@ def build_sky_index(
     angles = azimuths_deg(n_azimuth, azimuth_offset_ratio)
     directions = [(math.sin(math.radians(a)), math.cos(math.radians(a))) for a in angles]
 
+    # 規制ごとの適用範囲の外にあるマスは、その規制の測定点からは見ないように
+    # する（令135条の6第1項1号の「…が適用される範囲内の部分に限る」）。
+    # 距離を inf にすれば仰角0になり、そのマスは天空を塞がない扱いになる。
+    # マスが範囲に一部でもかかっていれば含める（多めに見る＝厳しい側）。
+    outside: dict[str, np.ndarray] = {}
+    for kind in set(kinds):
+        region = applicable_region(site, kind)
+        if region is None:
+            outside[kind] = np.ones(len(area.cells), dtype=bool)
+        else:
+            outside[kind] = np.array(
+                [not cell.polygon.intersects(region) for cell in area.cells],
+                dtype=bool)
+
     distances: list[np.ndarray] = []
     pr = np.zeros(len(points))
     for i, point in enumerate(points):
@@ -212,10 +227,12 @@ def build_sky_index(
         if len(area.cells):
             for ai, direction in enumerate(directions):
                 table[ai] = _ray_entry_distances(origin, direction, boxes)
+            table[:, outside[kinds[i]]] = np.inf
         distances.append(table)
         # Pr は形が変わらないので1回だけ。Ps と同じ方位でサンプリングする。
+        # 測定点の種別ごとに違う適合建築物と比べる（令135条の6・7・8）
         pr[i] = sky_ratio_percent(
-            (point[0], point[1], float(z_m[i])), reference,
+            (point[0], point[1], float(z_m[i])), references.get(kinds[i], []),
             n_azimuth, azimuth_offset_ratio)
 
     return SkyIndex(

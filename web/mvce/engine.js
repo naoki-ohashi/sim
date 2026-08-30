@@ -556,6 +556,20 @@
     return Math.min(sNeeded, sMax);
   }
 
+  // 道路斜線: 適用距離で頭打ちにしない素の必要距離。
+  // 天空率の道路高さ制限適合建築物は「適用距離までの帯の中で斜線どおりの形」
+  // なので、頭打ちにすると帯の中に何も残らなくなる（令135条の6第1項1号）。
+  function roadSlantDistanceForHeight(site, edgeIndex, heightM) {
+    const edge = site.edges[edgeIndex];
+    if (edge.kind !== 'road' || heightM <= 0) return 0;
+    const tier = roadSlantTier(site.zoning.zoneType, site.zoning.farRatio,
+      site.zoning.unspecifiedRoadSlantSlope);
+    const base = edge.roadWidthM + edge.wallSetbackM + relaxWidth(edge, ROAD_RELAX, false);
+    const level = roadLevelRelax(edge);
+    if (heightM <= tier.slope * base + level) return 0;
+    return (heightM - level) / tier.slope - base;
+  }
+
   // 隣地斜線: 高さ height_m を確保するために必要な、隣地境界線からの後退距離
   function adjacentRequiredSetback(site, edgeIndex, heightM) {
     const edge = site.edges[edgeIndex];
@@ -614,22 +628,126 @@
     return values.length ? Math.max(...values) * 1.5 : 120.0;
   }
 
-  // 適合建築物（斜線制限ぎりぎりの建物）を階段状に近似する
-  function referenceBuilding(site, nLayers) {
+  /* 適合建築物（令135条の6・7・8）
+   *
+   * **規制ごとに別の適合建築物。** 令135条の6は道路高さ制限だけ、
+   * 令135条の7は隣地高さ制限だけ、令135条の8は北側高さ制限だけに適合する形。
+   * 3つを合成した1つの形ではない。
+   *
+   * 各層は「層の**上端**」の断面で作る。斜線は上へ行くほど狭くなるので、
+   * 上端の断面で作った階段状の立体は真の包絡形に含まれ、Pr が大きめに
+   * 出る（＝厳しい側）。下端で作ると立体が大きくなって Pr が小さく出て、
+   * 本来通らない計画が通ってしまう。
+   */
+  const SKY_REFERENCE_KINDS = ['road', 'adjacent', 'north'];
+  const SKY_SEARCH_CEILING_M = 400.0;
+
+  function skyRequiredSetback(site, edgeIndex, heightM, kind) {
+    const edge = site.edges[edgeIndex];
+    if (kind === 'road') {
+      return edge.kind === 'road' ? roadSlantDistanceForHeight(site, edgeIndex, heightM) : 0;
+    }
+    if (kind === 'adjacent') {
+      return edge.kind === 'adjacent' ? adjacentRequiredSetback(site, edgeIndex, heightM) : 0;
+    }
+    if (kind === 'north') {
+      return northEdgeIndices(site).includes(edgeIndex)
+        ? northRequiredSetback(site, edgeIndex, heightM) : 0;
+    }
+    throw new Error('kind は road / adjacent / north のいずれか: ' + kind);
+  }
+
+  // 道路高さ制限が適用される範囲の深さ（別表第三（は）欄の適用距離まで）。
+  // 前面道路が2以上なら令135条の6第3項の区域ごとの比較が必要で未対応 → throw。
+  function skyRoadBand(site) {
+    const roads = site.edges
+      .map((e, i) => (e.kind === 'road' ? i : -1)).filter(i => i >= 0);
+    if (roads.length >= 2) {
+      throw new Error(
+        `前面道路が${roads.length}本あります。令135条の6第3項・令135条の9第3項は、`
+        + '前面道路が2以上ある場合に令132条・令134条2項の区域ごとに比較することを'
+        + '求めています。MVCE は区域分割に対応していないため、天空率による'
+        + '道路高さ制限の適用除外（法56条7項1号）は判定できません。'
+        + '斜線制限のまま（天空率を使わない設定）で計算してください。');
+    }
+    if (!roads.length) return null;
+    const i = roads[0];
+    const edge = site.edges[i];
+    const tier = roadSlantTier(site.zoning.zoneType, site.zoning.farRatio,
+      site.zoning.unspecifiedRoadSlantSlope);
+    const base = edge.roadWidthM + edge.wallSetbackM + relaxWidth(edge, ROAD_RELAX, false);
+    const depth = tier.dist - base;
+    return depth > 0 ? { edgeIndex: i, depth } : null;
+  }
+
+  // その規制が適用される範囲に、点が入っているか
+  function skyPointInApplicableRange(site, point, kind) {
+    if (kind === 'road') {
+      const band = skyRoadBand(site);
+      if (!band) return false;
+      const edge = site.edges[band.edgeIndex];
+      const n = interiorNormal(edge.p1, edge.p2);
+      const s = (point[0] - edge.p1[0]) * n[0] + (point[1] - edge.p1[1]) * n[1];
+      return s <= band.depth + 1e-9;
+    }
+    if (kind === 'adjacent') {
+      return !!adjacentSlantParams(site.zoning.zoneType, site.zoning.farRatio,
+        site.zoning.unspecifiedAdjacentSlantSlope, site.zoning.adjacentSlant25Designated);
+    }
+    return !!northSlantParams(site.zoning.zoneType);
+  }
+
+  function skyReferenceRing(site, heightM, kind) {
+    const distances = site.edges.map((_e, i) => skyRequiredSetback(site, i, heightM, kind));
+    let ring = offsetPolygonByEdgeDistances(site.points, distances);
+    if (!ring) return null;
+    if (kind === 'road') {
+      const band = skyRoadBand(site);
+      if (!band) return null;
+      const edge = site.edges[band.edgeIndex];
+      const n = interiorNormal(edge.p1, edge.p2);
+      // s <= depth の側を残す（内向き法線の逆）
+      const origin = [edge.p1[0] + band.depth * n[0], edge.p1[1] + band.depth * n[1]];
+      ring = clipByHalfPlane(ring, origin, [-n[0], -n[1]]);
+    } else if (!skyPointInApplicableRange(site, site.points[0], kind)) {
+      return null;
+    }
+    return (ring && ring.length >= 3 && polygonArea(ring) > 1e-9) ? ring : null;
+  }
+
+  function skyReferenceTop(site, kind) {
+    if (!skyReferenceRing(site, 0, kind)) return 0;
+    let lo = 0, hi = 1;
+    while (hi < SKY_SEARCH_CEILING_M && skyReferenceRing(site, hi, kind)) { lo = hi; hi *= 2; }
+    if (hi >= SKY_SEARCH_CEILING_M) return SKY_SEARCH_CEILING_M;
+    for (let k = 0; k < 40; k++) {
+      const mid = (lo + hi) / 2;
+      if (skyReferenceRing(site, mid, kind)) lo = mid; else hi = mid;
+    }
+    return lo;
+  }
+
+  function referenceBuilding(site, kind, nLayers) {
     nLayers = nLayers || 20;
-    const top = maxRelevantHeight(site);
+    const top = skyReferenceTop(site, kind);
     if (top <= 0) return [];
     const blocks = [];
     let previous = 0;
     for (let k = 0; k < nLayers; k++) {
       const zTop = (top * (k + 1)) / nLayers;
-      const ring = buildableRingAtHeight(site, previous);
+      const ring = skyReferenceRing(site, zTop, kind);
       if (ring && ring.length >= 3 && polygonArea(ring) > 1e-6) {
         blocks.push({ ring, zBottom: previous, zTop });
       }
       previous = zTop;
     }
     return blocks;
+  }
+
+  function referenceBuildings(site, nLayers) {
+    const out = {};
+    for (const kind of SKY_REFERENCE_KINDS) out[kind] = referenceBuilding(site, kind, nLayers);
+    return out;
   }
 
   // ===== 天空率（法56条7項、令135条の5〜11。Python版 sky_ratio.py 相当） =========
@@ -814,9 +932,10 @@
   const SKY_TOLERANCE_PERCENT = 1e-9;
 
   function buildSkyIndex(site, area, maxIntervalM, nAzimuth, reference, azimuthOffsetRatio) {
+    // reference は規制ごとの適合建築物 {road, adjacent, north}（令135条の6・7・8）
     nAzimuth = nAzimuth || DEFAULT_SKY_N_AZIMUTH;
     azimuthOffsetRatio = azimuthOffsetRatio != null ? azimuthOffsetRatio : SKY_AZIMUTH_OFFSET_RATIO;
-    if (!reference) reference = referenceBuilding(site);
+    if (!reference) reference = referenceBuildings(site);
 
     const nCells = area.cells.length;
     const boxes = area.cells.map(c => c.bounds);
@@ -832,20 +951,38 @@
       return [Math.sin(rad), Math.cos(rad)];
     });
 
+    // 規制ごとの適用範囲の外にあるマスは、その規制の測定点からは見ない
+    // （令135条の6第1項1号の「…が適用される範囲内の部分に限る」）。距離を
+    // Infinity にすれば仰角0になり、そのマスは天空を塞がない扱いになる。
+    // マスの隅がひとつでも範囲に入っていれば含める（多め＝厳しい側）。
+    const outside = {};
+    for (const kind of new Set(kinds)) {
+      outside[kind] = area.cells.map(c => {
+        const [x0, y0, x1, y1] = c.bounds;
+        const corners = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+        return !corners.some(p => skyPointInApplicableRange(site, p, kind));
+      });
+    }
+
     const distances = [];
     const pr = new Float64Array(points.length);
     points.forEach((point, i) => {
       const table = new Float64Array(nAzimuth * nCells).fill(Infinity);
+      const skip = outside[kinds[i]];
       if (nCells) {
         directions.forEach((dir, ai) => {
           const base = ai * nCells;
           for (let ci = 0; ci < nCells; ci++) {
-            table[base + ci] = rayBoxEntry(point[0], point[1], dir[0], dir[1], boxes[ci]);
+            table[base + ci] = skip[ci]
+              ? Infinity
+              : rayBoxEntry(point[0], point[1], dir[0], dir[1], boxes[ci]);
           }
         });
       }
       distances.push(table);
-      pr[i] = skyRatioPercent([point[0], point[1], zM[i]], reference, nAzimuth, azimuthOffsetRatio);
+      // 測定点の種別ごとに違う適合建築物と比べる（令135条の6・7・8）
+      pr[i] = skyRatioPercent([point[0], point[1], zM[i]], reference[kinds[i]] || [],
+        nAzimuth, azimuthOffsetRatio);
     });
 
     return {
@@ -1179,7 +1316,9 @@
     deemedBoundaryOffsets, regulationBoundary, shadowMeasurementPoints, trueSolarHours,
     rayBoxEntry, buildShadowIndex, hoursAt, worstViolation, isShadowCompliant, shadowSummary,
     roadRequiredSetback, adjacentRequiredSetback, northRequiredSetback,
-    requiredSetbackForHeight, buildableRingAtHeight, maxRelevantHeight, referenceBuilding,
+    requiredSetbackForHeight, buildableRingAtHeight, maxRelevantHeight,
+    referenceBuilding, referenceBuildings, skyReferenceRing, skyReferenceTop,
+    roadSlantDistanceForHeight, skyPointInApplicableRange,
     rayPolygonEntryDistance, silhouetteElevationRad, azimuthsDeg, skyRatioPercent,
     skyMeasurementPoints, buildSkyIndex, skyPsAt, skyWorst, skyIsCompliant, skyRidgeCells,
     skySummary, DEFAULT_SKY_N_AZIMUTH, SKY_AZIMUTH_OFFSET_RATIO,

@@ -82,11 +82,15 @@ if (input.want.includes('sky')) {
     azimuths: E.azimuthsDeg(nAzimuth, azimuthOffsetRatio),
     measurementPoints: E.skyMeasurementPoints(site, input.skyMaxIntervalM)
       .map(s => ({ point: s.point, z: s.z, kind: s.kind, edgeIndex: s.edgeIndex })),
-    referenceLayerCount: E.referenceBuilding(site, input.skyNLayers || 20).length,
+    referenceLayerCounts: Object.fromEntries(['road', 'adjacent', 'north'].map(
+      k => [k, E.referenceBuilding(site, k, input.skyNLayers || 20).length])),
+    referenceTops: Object.fromEntries(['road', 'adjacent', 'north'].map(
+      k => [k, E.skyReferenceTop(site, k)])),
     requiredSetbacks: (input.skySetbackCases || []).map(c =>
       E.requiredSetbackForHeight(site, c.edgeIndex, c.heightM)),
     skyRatios: (input.skyRatioCases || []).map(c => {
-      const reference = E.referenceBuilding(site, input.skyNLayers || 20);
+      const reference = E.referenceBuilding(site, c.kind || 'adjacent',
+        input.skyNLayers || 20);
       return E.skyRatioPercent(c.point3, reference, nAzimuth, azimuthOffsetRatio);
     }),
   };

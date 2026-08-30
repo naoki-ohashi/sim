@@ -122,12 +122,30 @@ def test_result_is_verified_compliant_by_an_independent_check():
         f"最小余裕 {min(c.margin for c in checks):+.3f}%"
 
 
-def test_summary_reports_the_same_margin_as_the_independent_check():
+def test_index_margin_is_never_more_optimistic_than_the_independent_check():
+    """インデックスの余裕は、多角形版の余裕を上回らない。
+
+    **これが「インデックスが適合と言えば本当に適合」を支える性質です。**
+    以前は両者が厳密に一致していましたが、令135条の6第1項1号の
+    「適用範囲内の部分に限る」で計画建築物を切るようになって差が出ます。
+
+    - 多角形版はブロックの平面形状を範囲で**正確に**切る
+    - インデックスはマスの単位でしか切れないので、範囲に一部でもかかった
+      マスは丸ごと残す（多めに残す＝空を塞ぐ側＝Ps が小さい）
+
+    したがってインデックスのほうが常に厳しく出ます。逆向きになったら、
+    最適化が「適合」と言った結果が実際には不適合になりうるということです。
+    """
     site = _site(setback=3.0, far=3.0, road=8.0)
     result = optimize(site, None, _options(use_sky_ratio=True))
     checks = _independent_check(site, result.blocks)
-    assert result.sky_ratio.worst_margin == pytest.approx(
-        min(c.margin for c in checks), abs=1e-9)
+    index_margin = result.sky_ratio.worst_margin
+    polygon_margin = min(c.margin for c in checks)
+    assert index_margin <= polygon_margin + 1e-9, (
+        f"インデックス {index_margin:+.4f}% が多角形版 {polygon_margin:+.4f}% より"
+        "甘く出ています（この向きが崩れると最適化結果を信用できません）"
+    )
+    assert polygon_margin >= 0.0
 
 
 def test_not_used_means_no_sky_ratio_judgement():
