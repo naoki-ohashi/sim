@@ -27,6 +27,15 @@ from ..site import Boundary, RelaxationKind, Site
 from ..zoning import adjacent_slant_item, adjacent_slant_params
 
 # 令135条の3第1項1号の緩和対象: 公園・広場・水面・線路敷
+# 令135条の3第1項第1号が列挙するのは
+# 「公園（都市公園法施行令2条1項1号の都市公園を除く）、広場、水面
+#   その他これらに類するもの」。
+#
+# ⚠ **線路敷は列挙されていません**（食い違い AA）。北側（令135条の4）と
+# 日影（令135条の12）は線路敷を明示しているのに、隣地と道路は挙げて
+# いません。ここに入れているのは「その他これらに類するもの」に当たると
+# いう解釈で、緩い側です。
+# ⚠ **都市公園の除外も未実装**です。入力に都市公園かどうかの区別が要ります。
 ADJACENT_RELAXATION_KINDS = {RelaxationKind.PARK, RelaxationKind.WATER, RelaxationKind.RAILWAY}
 
 
