@@ -24,6 +24,7 @@ from .north import NorthReference
 from .solvers.optimizer import OptimizeOptions
 from .regulations.shadow import ShadowRegulationSpec
 from .site import Site
+from .zone_split import ZonePart, ZoneSplit
 from .zoning import ZoningParams, validate_measurement_height
 
 
@@ -61,6 +62,26 @@ def _build_zoning(data: dict) -> ZoningParams:
         unspecified_adjacent_slant_slope=data.get("unspecified_adjacent_slant_slope"),
         adjacent_slant_2_5_designated=data.get("adjacent_slant_2_5_designated", False),
     )
+
+
+def _build_zone_split(data) -> "ZoneSplit | None":
+    """`zone_split:` から法52条7項・法53条2項の区分を作る。
+
+    各要素は `{area_m2, zone_type, far_ratio, coverage_ratio, ...}`。
+    `zoning:` と同じキーに `area_m2` と任意の `label` を足したものです。
+    """
+    if not data:
+        return None
+    parts = []
+    for i, item in enumerate(data):
+        item = dict(item)
+        area = item.pop("area_m2", None)
+        if area is None:
+            raise ValueError(f"zone_split[{i}] に area_m2 がありません")
+        label = item.pop("label", "")
+        parts.append(ZonePart(zoning=_build_zoning(item), area_m2=float(area),
+                              label=label))
+    return ZoneSplit(tuple(parts))
 
 
 def _ratio(value: float) -> float:
@@ -148,6 +169,7 @@ def _build_site(data: dict) -> tuple[Site, list[str]]:
         apply_article_134_2=data.get("apply_article_134_2", False),
         railway_is_adjacent_relaxation=data.get("railway_is_adjacent_relaxation", False),
         ground_levels=data.get("ground_levels"),
+        zone_split=_build_zone_split(data.get("zone_split")),
     )
     return site, notes
 

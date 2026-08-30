@@ -21,6 +21,7 @@ from typing import Optional, Sequence
 from .crs import CrsContext
 from .geometry import Point, dedupe_ring, polygon_area, polygon_signed_area
 from .north import NorthReference
+from .zone_split import ZoneSplit
 from .zoning import ZoningParams
 
 
@@ -223,6 +224,12 @@ class Site:
     #: 既定の False は令132条1項によるということで、保守側です。
     apply_article_134_2: bool = False
 
+    #: 敷地が用途地域の2以上にわたる場合の区分（法52条7項・法53条2項）。
+    #: `None` なら `zoning` 1つ。容積率・建蔽率はここから面積按分します。
+    #: **斜線・日影は按分しません**（法56条5項・令135条の13）。用途地域が
+    #: 2以上あるとそれらは `UndeterminedRegulation` で止まります。
+    zone_split: Optional["ZoneSplit"] = None
+
     #: 敷地の各頂点の地盤の高さ（GL, m）。`points` と同じ数・同じ順。
     #: `None` なら地盤の情報が無い＝平坦（Z=0）として扱います。
     #: 令2条2項の平均地盤面はここから求めます（`ground_contour()`）。
@@ -252,6 +259,13 @@ class Site:
             p1, p2 = self.points[i], self.points[(i + 1) % len(self.points)]
             if not (_same(edge.p1, p1) and _same(edge.p2, p2)):
                 raise ValueError(f"edges[{i}] の端点が points[{i}]→points[{i+1}] と一致しません")
+        if self.zone_split is not None:
+            self.zone_split.check_total_area(polygon_area(self.points))
+            if self.zoning.zone_type not in self.zone_split.zone_types:
+                raise ValueError(
+                    f"zoning.zone_type={self.zoning.zone_type!r} が zone_split の"
+                    f"どの区域にもありません（区分: {self.zone_split.zone_types}）"
+                )
         if self.ground_levels is not None:
             self.ground_levels = tuple(float(z) for z in self.ground_levels)
             if len(self.ground_levels) != len(self.points):
@@ -311,8 +325,19 @@ class Site:
         return max((e.road_width_m for e in self.road_edges), default=0.0)
 
     def max_building_area_m2(self) -> float:
-        """建蔽率による建築面積の上限。"""
-        return self.area_m2 * self.zoning.coverage_ratio
+        """建蔽率による建築面積の上限。
+
+        敷地が用途地域の2以上にわたるときは法53条2項で面積按分します。
+        """
+        return self.area_m2 * self.coverage_ratio_limit()
+
+    def coverage_ratio_limit(self) -> float:
+        """適用される建蔽率（法53条1項、またがりは法53条2項）。"""
+        from .zone_split import weighted_coverage_limit
+
+        if self.zone_split is None:
+            return self.zoning.coverage_ratio
+        return weighted_coverage_limit(self.zone_split)[0]
 
     def max_total_floor_area_m2(self) -> float:
         """容積率による延床面積の上限。
@@ -337,6 +362,7 @@ class Site:
         apply_article_134_2: bool = False,
         railway_is_adjacent_relaxation: bool = False,
         ground_levels: Optional[Sequence[float]] = None,
+        zone_split: Optional[ZoneSplit] = None,
     ) -> "Site":
         """頂点列と辺の設定（dict）から Site を作る。
 
@@ -387,6 +413,7 @@ class Site:
             crs=crs, apply_article_134_2=apply_article_134_2,
             railway_is_adjacent_relaxation=railway_is_adjacent_relaxation,
             ground_levels=tuple(levels) if levels is not None else None,
+            zone_split=zone_split,
         )
 
 

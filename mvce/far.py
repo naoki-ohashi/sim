@@ -165,6 +165,9 @@ def _specified_road_notes(site) -> tuple[dict[int, RoadFarWidth], list[str]]:
 
 def compute_far(site) -> FarResult:
     """敷地に適用される容積率を求める。"""
+    if site.zone_split is not None and not site.zone_split.is_single:
+        return _compute_far_split(site)
+
     designated = site.zoning.far_ratio
     additions, notes = _specified_road_notes(site)
     max_width = far_road_width_m(site)
@@ -213,6 +216,54 @@ def compute_far(site) -> FarResult:
     )
     return FarResult(
         designated, road_far, effective, max_width, coefficient, notes, additions,
+    )
+
+
+def _compute_far_split(site) -> FarResult:
+    """法52条7項: 敷地が容積率の制限の異なる区域の2以上にわたる場合。
+
+    各区域の限度（法52条1項・2項）を面積割合で按分します。前面道路の幅員は
+    敷地に1つですが、**乗ずる係数（4/10・6/10）は用途地域ごとに違う**ので、
+    区域ごとに `min(指定容積率, 幅員×係数)` を出してから按分します。
+
+    法52条9項（特定道路）の読み替えは「第二項から第七項まで」なので、
+    ここで使う幅員も加算後の値です。
+    """
+    from .zone_split import weighted_far_limit
+
+    split = site.zone_split
+    additions, notes = _specified_road_notes(site)
+    max_width = far_road_width_m(site)
+
+    effective, split_notes = weighted_far_limit(split, max_width)
+    notes.extend(split_notes)
+
+    # 按分後の値は「1項及び2項による限度を按分したもの」そのもので、
+    # 指定容積率と道路による低減のどちらか一方ではない。designated には
+    # 道路による低減を掛けない側（1項だけ）の按分を入れておく。
+    designated = sum(
+        p.zoning.far_ratio * p.area_m2 for p in split.parts
+    ) / split.total_area_m2
+    road_far = effective if effective < designated - 1e-12 else None
+    if road_far is not None:
+        notes.append(
+            f"→ 前面道路幅員（法52条2項）が効いている区域があるため、"
+            f"按分後の容積率は {effective * 100:.1f}% です"
+            f"（1項だけを按分すると {designated * 100:.1f}%）。"
+        )
+    if len(site.road_edges) > 1:
+        notes.append(
+            f"前面道路が{len(site.road_edges)}本あるため、最大幅員"
+            f"{max_width:.1f}mで判定しています。"
+        )
+    notes.append(
+        "**斜線制限と日影規制は按分しません。** 隣地・北側は法56条5項が"
+        "「建築物」を「建築物の部分」と読み替え、道路は別表第三（い）欄が"
+        "「建築物がある地域」ごと、日影は令135条の13 が「各区域内に"
+        "それぞれ対象建築物があるものとして適用」と定めています。"
+    )
+    return FarResult(
+        designated, road_far, effective, max_width, None, notes, additions,
     )
 
 

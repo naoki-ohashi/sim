@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 from ..geometry import Point, offset_polygon_by_edge_distances, polygon_to_ring
 from ..site import Site
+from ..zone_split import require_single_zone_type
 from . import adjacent_slant, north_slant, road_slant
 
 
@@ -27,6 +28,7 @@ class HeightBreakdown:
 
 
 def breakdown_at(site: Site, point: Point) -> HeightBreakdown:
+    require_single_zone_type(site.zone_split, "斜線制限（法56条）")
     road = road_slant.height_limit_at(site, point)
     adjacent = adjacent_slant.height_limit_at(site, point)
     north = north_slant.height_limit_at(site, point)
@@ -49,6 +51,7 @@ def height_limit_at(site: Site, point: Point, use_sky_ratio: bool = False) -> fl
     `sky_ratio.py` で別途行います）。
     """
     if use_sky_ratio:
+        require_single_zone_type(site.zone_split, "絶対高さ制限（法55条）")
         return (site.zoning.absolute_height_limit_m
                 if site.zoning.absolute_height_limit_m is not None else math.inf)
     return breakdown_at(site, point).limit_m
@@ -56,6 +59,7 @@ def height_limit_at(site: Site, point: Point, use_sky_ratio: bool = False) -> fl
 
 def required_setback_for_height(site: Site, edge_index: int, height_m: float) -> float:
     """辺 `edge_index` について、高さ `height_m` に必要な後退距離。"""
+    require_single_zone_type(site.zone_split, "斜線制限（法56条）")
     edge = site.edges[edge_index]
     if edge.is_road:
         return road_slant.required_setback_for_height(site, edge_index, height_m)
@@ -86,6 +90,7 @@ def max_relevant_height(site: Site) -> float:
     絶対高さ制限があればそれ、無ければ敷地の各頂点と重心での斜線制限の
     最大値に余裕を見た値を使います。
     """
+    require_single_zone_type(site.zone_split, "絶対高さ制限（法55条）")
     if site.zoning.absolute_height_limit_m is not None:
         return site.zoning.absolute_height_limit_m
     cx = sum(p[0] for p in site.points) / len(site.points)

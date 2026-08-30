@@ -502,6 +502,22 @@
   }
 
   function fromYaml(text) {
+    // ブラウザ版は敷地に用途地域1つの前提。zone_split（法52条7項・法53条2項の
+    // 按分）と ground_levels（令2条2項）は Python 版のみで、黙って無視すると
+    // 数字が間違うので止める。
+    if (/^\s*zone_split:/m.test(text)) {
+      throw new Error(
+        'この設定は敷地が用途地域の2以上にわたります（zone_split）。'
+        + 'ブラウザ版は用途地域1つの前提なので、読み込むと容積率・建蔽率が'
+        + '間違います。法52条7項・法53条2項の按分に対応した Python 版'
+        + '（mvce コマンド）を使ってください。');
+    }
+    if (/^\s*ground_levels:/m.test(text)) {
+      throw new Error(
+        'この設定は地盤の高さ（ground_levels）を持っています。'
+        + 'ブラウザ版は令2条2項の平均地盤面に対応していないので、'
+        + 'Python 版（mvce コマンド）を使ってください。');
+    }
     resetPlanView();
     const num = re => { const m = text.match(re); return m ? parseFloat(m[1]) : null; };
     const str = re => { const m = text.match(re); return m ? m[1].trim() : null; };

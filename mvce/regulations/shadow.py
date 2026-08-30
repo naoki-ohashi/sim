@@ -71,6 +71,7 @@ from shapely.geometry import LineString, Polygon
 from ..geometry import Point, ensure_ccw, interior_normal, polygon_to_ring
 from ..massing import Block
 from ..site import RelaxationKind, Site
+from ..zone_split import require_single_zone_type
 from ..solar import (
     HOKKAIDO_HOURS,
     STANDARD_HOURS,
@@ -240,6 +241,7 @@ def _offset_ring(points: list[Point], offsets: list[float]) -> list[Point]:
 
 def regulation_boundary(site: Site, spec: ShadowRegulationSpec) -> list[Point]:
     """日影規制の基準となる敷地境界線（みなし境界線を適用したもの）。"""
+    require_single_zone_type(site.zone_split, "日影規制（法56条の2）")
     if not spec.apply_deemed_boundary:
         return ensure_ccw(site.points)
     return _offset_ring(site.points, deemed_boundary_offsets(site, spec))
