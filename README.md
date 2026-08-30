@@ -1,11 +1,12 @@
 # MVE / jwcad-volume
 
-このリポジトリには2つのパッケージがあります。
+このリポジトリには3つのパッケージがあります。
 
 | | 用途 | 状態 |
 |---|---|---|
 | **`mve/`** | 日影規制・斜線制限をふまえた最大容積の計算エンジン | **現行**。日影対応をボクセル法で作り直し、複数前面道路・各種緩和・真北・測定面選択に対応 |
 | `jwcad_volume/` | JW-CAD外部変形連携（JWC形式・バッチ・exe化） | 実績があるため維持。計算エンジンとしてはMVEが後継 |
+| `freecad_area/` | FreeCAD（Arch）の部屋から床面積表をExcel/CSVに出力 | 独立した小ツール。[`docs/freecad_floor_area.md`](docs/freecad_floor_area.md) |
 
 **MVEの操作手順は [`docs/mve/manual.md`](docs/mve/manual.md)（取扱説明書）、
 概要は [`docs/mve/README.md`](docs/mve/README.md)、設計の全体像は
@@ -22,6 +23,21 @@ python3 tools/build_mve_web.py     # dist/MVE.html をダブルクリック
 ```bash
 mve examples/mve_sample.yaml
 ```
+
+## FreeCADの床面積集計（`freecad_area/`）
+
+FreeCADのBIM/Archで作った部屋（Space）の床面積を集計してExcel/CSVに
+書き出します。FreeCADの中でマクロとして実行するか、保存済みの `.FCStd`
+をFreeCADなしで読むかを選べます。
+
+```bash
+freecad-floor-area 住宅.FCStd     # 住宅_床面積.xlsx ができます
+```
+
+FreeCADの中から使う場合は `freecad/床面積集計.FCMacro` を実行します。
+詳しくは [`docs/freecad_floor_area.md`](docs/freecad_floor_area.md) を
+参照してください（床面積に `Shape.Area` を使うと全表面積になってしまう、
+という定番の落とし穴の説明もあります）。
 
 以下は `jwcad_volume` の説明です。
 
@@ -193,6 +209,13 @@ jww/                            # JWW外部変形として配布するファイ�
   gaihen_params.yaml            # 用途地域・道路幅員などの設定
 build_windows.bat               # Windows用exeビルドスクリプト
 examples/sample_site.yaml       # サンプル設定ファイル
+freecad_area/                   # FreeCADの部屋→床面積表(Excel/CSV)
+  rooms.py                      # 部屋の判定と床面積の取り出し
+  fcstd.py                      # FreeCADなしで.FCStdから面積を読む
+  table.py                      # 床面積表の行の組み立て(階別小計・合計)
+  export.py                     # Excel(.xlsx)/CSV出力
+  cli.py                        # freecad-floor-area コマンド
+freecad/床面積集計.FCMacro       # FreeCADの中で実行するマクロ
 ```
 
 ## テスト

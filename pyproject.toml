@@ -11,19 +11,22 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0"]
+dev = ["pytest>=7.0", "openpyxl>=3.1"]
+# FreeCADの床面積表をExcel(.xlsx)で出す場合（CSVだけなら不要）
+excel = ["openpyxl>=3.1"]
 
 [project.scripts]
 jwcad-volume = "jwcad_volume.cli:main"
 jwcad-volume-gaihen = "jwcad_volume.gaihen:main"
 mve = "mve.cli:main"
+freecad-floor-area = "freecad_area.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["jwcad_volume*", "mve*"]
+include = ["jwcad_volume*", "mve*", "freecad_area*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

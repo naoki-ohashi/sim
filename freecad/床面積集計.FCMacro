@@ -1,0 +1,152 @@
+# -*- coding: utf-8 -*-
+"""FreeCADの部屋（Arch Space）の床面積をExcel/CSVに書き出すマクロ。
+
+使い方
+------
+1. FreeCADで建物のファイルを開く（BIM/Archの「スペース」で部屋を作って
+   おいてください）。
+2. マクロ（[マクロ]-[マクロ...]）からこのファイルを実行する。
+3. 保存先を聞かれるので、`.xlsx` か `.csv` で保存する。
+
+このマクロをFreeCADのマクロフォルダにコピーして使う場合は、下の
+`REPO_ROOT` にこのリポジトリの場所を書くか、環境変数 `FREECAD_AREA_ROOT`
+に設定してください（リポジトリ内から直接実行する場合は不要です）。
+
+Excel(.xlsx)で出すには openpyxl が必要です。FreeCAD同梱のPythonに入って
+いない場合は `.csv` で保存してください（Excelでそのまま開けます）。
+"""
+import os
+import sys
+
+import FreeCAD as App
+
+# 例: REPO_ROOT = r"C:\\Users\\yourname\\sim"
+REPO_ROOT = ""
+
+#: 実行時に保存先を尋ねる（GUIがある場合のみ）。
+ASK_FOR_PATH = True
+
+
+def _candidate_roots():
+    if REPO_ROOT:
+        yield REPO_ROOT
+    env = os.environ.get("FREECAD_AREA_ROOT")
+    if env:
+        yield env
+    here = globals().get("__file__")
+    if here:
+        yield os.path.dirname(os.path.dirname(os.path.abspath(here)))
+
+
+def _import_package():
+    """`freecad_area` を読み込む（見つからなければリポジトリを探して追加）。"""
+    try:
+        import freecad_area  # noqa: F401
+        return
+    except ImportError:
+        pass
+    for root in _candidate_roots():
+        if os.path.isdir(os.path.join(root, "freecad_area")):
+            if root not in sys.path:
+                sys.path.insert(0, root)
+            return
+    raise ImportError(
+        "freecad_area が見つかりません。マクロ冒頭の REPO_ROOT に "
+        "このリポジトリの場所を書いてください。"
+    )
+
+
+def _default_path(doc, extension):
+    """既定の保存先（開いているファイルの隣、未保存ならデスクトップ）。"""
+    file_name = getattr(doc, "FileName", "") or ""
+    if file_name:
+        stem = os.path.splitext(file_name)[0]
+        return stem + "_床面積" + extension
+    desktop = os.path.join(os.path.expanduser("~"), "Desktop")
+    folder = desktop if os.path.isdir(desktop) else os.path.expanduser("~")
+    label = getattr(doc, "Label", None) or "床面積集計表"
+    return os.path.join(folder, "{}_床面積{}".format(label, extension))
+
+
+def _ask_path(default_path):
+    """GUIがあれば保存ダイアログを出す。無ければ既定のパスをそのまま使う。"""
+    if not ASK_FOR_PATH or not App.GuiUp:
+        return default_path
+    try:
+        try:
+            from PySide import QtWidgets as QtW
+        except ImportError:
+            from PySide import QtGui as QtW
+        selected, _ = QtW.QFileDialog.getSaveFileName(
+            None, "床面積表の保存先", default_path,
+            "Excel (*.xlsx);;CSV (*.csv)",
+        )
+    except Exception as exc:  # ダイアログが出せない環境でも止めない
+        App.Console.PrintWarning("保存ダイアログを開けませんでした: {}\n".format(exc))
+        return default_path
+    return selected or None
+
+
+def _report(message, warning=False):
+    printer = App.Console.PrintWarning if warning else App.Console.PrintMessage
+    printer(message + "\n")
+    if App.GuiUp:
+        try:
+            try:
+                from PySide import QtWidgets as QtW
+            except ImportError:
+                from PySide import QtGui as QtW
+            box = QtW.QMessageBox.warning if warning else QtW.QMessageBox.information
+            box(None, "床面積集計", message)
+        except Exception:
+            pass
+
+
+def export_floor_area(path=None):
+    """開いている文書の床面積表を書き出し、書き出したパスを返す。"""
+    _import_package()
+    from freecad_area.export import ExportError, openpyxl_available, write_area_table
+    from freecad_area.rooms import collect_rooms
+
+    doc = App.ActiveDocument
+    if doc is None:
+        _report("開いている文書がありません。ファイルを開いてから実行してください。", True)
+        return None
+
+    rooms = collect_rooms(doc)
+    if not rooms:
+        _report(
+            "部屋（Arch Space）が見つかりませんでした。\n"
+            "BIM/Archワークベンチの「スペース」で部屋を作ってから実行してください。",
+            True,
+        )
+        return None
+
+    if path is None:
+        extension = ".xlsx" if openpyxl_available() else ".csv"
+        path = _ask_path(_default_path(doc, extension))
+        if not path:
+            App.Console.PrintMessage("中止しました。\n")
+            return None
+        if not os.path.splitext(path)[1]:
+            path += extension
+
+    try:
+        write_area_table(rooms, path)
+    except ExportError as exc:
+        _report("書き出せませんでした: {}".format(exc), True)
+        return None
+
+    unknown = [r.name for r in rooms if r.floor_area_m2 is None]
+    total = sum(r.floor_area_m2 for r in rooms if r.floor_area_m2 is not None)
+    message = "{}室・合計 {:.2f} ㎡ を書き出しました:\n{}".format(len(rooms), total, path)
+    if unknown:
+        message += "\n面積が取れなかった部屋（空欄）: " + "、".join(unknown)
+    _report(message, bool(unknown))
+    return path
+
+
+# FreeCADはマクロを実行する名前空間がバージョンによって違うので、
+# 実行時に使われうる名前をまとめて見ています。
+if __name__ in ("__main__", "__builtin__", "builtins"):
+    export_floor_area()
