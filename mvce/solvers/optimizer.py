@@ -84,6 +84,11 @@ class OptimizeOptions:
     sky_ratio_interval_m: float | None = None
     #: 方位の分割数（use_sky_ratio のときだけ使う）
     sky_ratio_n_azimuth: int = 72
+    #: 適合建築物の階段状近似の層数（多いほど真の包絡形に近い）
+    sky_reference_layers: int = 20
+    #: 令2条2項の「平均の高さ」を接地線の長さで重み付けするか。
+    #: 条文が取り方を定めていないので、プロファイルから来ます。
+    ground_average_weighted: bool = True
     #: 日影規制への対応方法。ENVELOPE_FAMILIES のいずれか。
     envelope_family: str = "voxel"
     #: 屋根形状（lean_to/ridge）を探索するときのパラメータ。既定は inverse/shadow_envelope.py 参照。
@@ -219,7 +224,7 @@ class OptimizeResult:
         return lines
 
 
-def _ground_plane_notes(site) -> list[str]:
+def _ground_plane_notes(site, weighted: bool = True) -> list[str]:
     """令2条2項の地盤面についての注記。
 
     **高さはまだ Z=0 から測っています。** 地盤面の算定（`ground.py`）は
@@ -239,7 +244,7 @@ def _ground_plane_notes(site) -> list[str]:
             "Z=0 から測っています（一様なので相対的な結果は変わりません）。"
         ]
     try:
-        plane = site.ground_plane()
+        plane = site.ground_plane(weighted=weighted)
     except UndeterminedRegulation as e:
         return [
             f"令2条2項の地盤面が求まりません: {e}",
@@ -567,7 +572,7 @@ def optimize(
         raise ValueError(f"envelope_family は {'/'.join(ENVELOPE_FAMILIES)} のいずれかにしてください")
     far = compute_far(site)
     notes: list[str] = []
-    notes.extend(_ground_plane_notes(site))
+    notes.extend(_ground_plane_notes(site, opt.ground_average_weighted))
     if shadow_spec is not None:
         from ..regulations.shadow import deemed_average_ground_level_m
 
@@ -631,7 +636,8 @@ def optimize(
             if has_sky:
                 sky_index = build_sky_index(
                     site, area, max_interval_m=opt.sky_ratio_interval_m,
-                    n_azimuth=opt.sky_ratio_n_azimuth)
+                    n_azimuth=opt.sky_ratio_n_azimuth,
+                    reference_layers=opt.sky_reference_layers)
             roof_result = search_roof_envelope(
                 site, area, shadow_spec, floors, floor_h,
                 pattern=opt.envelope_family,
@@ -653,7 +659,8 @@ def optimize(
         elif has_sky:
             sky_index = build_sky_index(
                 site, area, max_interval_m=opt.sky_ratio_interval_m,
-                n_azimuth=opt.sky_ratio_n_azimuth)
+                n_azimuth=opt.sky_ratio_n_azimuth,
+                reference_layers=opt.sky_reference_layers)
 
         # 天空率がまだ解消されていなければ（日影の指定が無かった、または
         # 屋根形状の探索が両立する組み合わせを見つけられなかった）フリー
@@ -671,7 +678,8 @@ def optimize(
         shadow_index = build_shadow_index(site, area, shadow_spec)
         sky_index = build_sky_index(
             site, area, max_interval_m=opt.sky_ratio_interval_m,
-            n_azimuth=opt.sky_ratio_n_azimuth)
+            n_azimuth=opt.sky_ratio_n_azimuth,
+            reference_layers=opt.sky_reference_layers)
         shadow_limited, removed, sky_limited, removed_sky, joint_notes = (
             _resolve_shadow_and_sky_jointly(
                 area, floors, shadow_index, sky_index, floor_h, opt.max_iterations))
@@ -686,7 +694,8 @@ def optimize(
         if has_sky:
             sky_index = build_sky_index(
                 site, area, max_interval_m=opt.sky_ratio_interval_m,
-                n_azimuth=opt.sky_ratio_n_azimuth)
+                n_azimuth=opt.sky_ratio_n_azimuth,
+                reference_layers=opt.sky_reference_layers)
             sky_limited, removed_sky, sky_notes = _resolve_sky_ratio(
                 area, floors, sky_index, floor_h, opt.max_iterations)
             notes.extend(sky_notes)

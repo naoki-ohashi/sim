@@ -23,6 +23,8 @@ from .io.site_json import read_site_plan_json
 from .north import NorthReference
 from .solvers.optimizer import OptimizeOptions
 from .regulations.shadow import ShadowRegulationSpec
+from .profiles.loader import load_profile, profile_from_dict
+from .profiles.schema import STATUTORY_PROFILE, ComplianceProfile
 from .regulations.height_district import HeightDistrict, HeightDistrictTier
 from .site import ShadowGroundRelaxation, Site
 from .zone_split import ZonePart, ZoneSplit
@@ -47,6 +49,8 @@ class Project:
     options: OptimizeOptions
     shadow: ShadowRegulationSpec | None
     output: OutputSettings
+    #: 運用差と解釈の選択（`profiles/`）。既定は条文だけの `statutory`。
+    profile: ComplianceProfile = STATUTORY_PROFILE
     notes: list[str] = field(default_factory=list)
 
 
@@ -94,7 +98,22 @@ def _rectangle_points(width_m: float, depth_m: float) -> list[tuple[float, float
     return [(0.0, 0.0), (width_m, 0.0), (width_m, depth_m), (0.0, depth_m)]
 
 
-def _build_site(data: dict) -> tuple[Site, list[str]]:
+def _build_profile(data: dict) -> ComplianceProfile:
+    """`profile:` を読む。
+
+    - 文字列 … 組み込みの名前か YAML のパス
+    - マップ … その場で定義（`name` 必須、`statutory` 以外は `source` も必須）
+    - 省略 … 条文だけの `statutory`
+    """
+    raw = data.get("profile")
+    if raw is None:
+        return STATUTORY_PROFILE
+    if isinstance(raw, str):
+        return load_profile(raw)
+    return profile_from_dict(raw)
+
+
+def _build_site(data: dict, profile: ComplianceProfile) -> tuple[Site, list[str]]:
     notes: list[str] = []
     zoning = _build_zoning(data["zoning"])
     north = NorthReference(north_angle_deg=data.get("north_angle_deg", 0.0))
@@ -167,8 +186,11 @@ def _build_site(data: dict) -> tuple[Site, list[str]]:
     site = Site.from_rings(
         points, normalized, zoning, north=north,
         floor_height_m=floor_height, name=data.get("name", ""),
-        apply_article_134_2=data.get("apply_article_134_2", False),
-        railway_is_adjacent_relaxation=data.get("railway_is_adjacent_relaxation", False),
+        # 敷地の YAML に書いてあればそれが優先、無ければプロファイルの運用値
+        apply_article_134_2=data.get(
+            "apply_article_134_2", profile.apply_article_134_2),
+        railway_is_adjacent_relaxation=data.get(
+            "railway_is_adjacent_relaxation", profile.railway_is_adjacent_relaxation),
         ground_levels=data.get("ground_levels"),
         zone_split=_build_zone_split(data.get("zone_split")),
         shadow_ground=_build_shadow_ground(data.get("shadow_ground")),
@@ -214,7 +236,8 @@ def _build_shadow_ground(data: dict | None) -> ShadowGroundRelaxation | None:
     )
 
 
-def _build_shadow(data: dict | None) -> ShadowRegulationSpec | None:
+def _build_shadow(data: dict | None,
+                  profile: ComplianceProfile) -> ShadowRegulationSpec | None:
     if not data:
         return None
     return ShadowRegulationSpec(
@@ -226,13 +249,15 @@ def _build_shadow(data: dict | None) -> ShadowRegulationSpec | None:
         time_step_minutes=data.get("time_step_minutes", 10.0),
         sample_interval_m=data.get("sample_interval_m", 2.0),
         apply_deemed_boundary=data.get("apply_deemed_boundary", True),
+        park_is_deemed_boundary=data.get(
+            "park_is_deemed_boundary", profile.park_is_deemed_boundary),
         isochrone_hours=list(data.get("isochrone_hours", [])),
         isochrone_grid_interval_m=data.get("isochrone_grid_interval_m", 2.0),
         isochrone_margin_m=data.get("isochrone_margin_m"),
     )
 
 
-def _build_options(data: dict | None) -> OptimizeOptions:
+def _build_options(data: dict | None, profile: ComplianceProfile) -> OptimizeOptions:
     data = data or {}
     return OptimizeOptions(
         cell_size_x_m=data.get("cell_size_x_m", 3.0),
@@ -241,8 +266,13 @@ def _build_options(data: dict | None) -> OptimizeOptions:
         coverage_threshold=data.get("coverage_threshold", 0.5),
         use_sky_ratio=data.get("use_sky_ratio", False),
         max_iterations=data.get("max_iterations", 4000),
-        sky_ratio_interval_m=data.get("sky_ratio_interval_m"),
-        sky_ratio_n_azimuth=data.get("sky_ratio_n_azimuth", 72),
+        sky_ratio_interval_m=data.get(
+            "sky_ratio_interval_m", profile.sky_measurement_interval_m),
+        sky_ratio_n_azimuth=data.get(
+            "sky_ratio_n_azimuth", profile.sky_azimuth_count),
+        sky_reference_layers=data.get(
+            "sky_reference_layers", profile.sky_reference_layers),
+        ground_average_weighted=profile.ground_weighted,
         envelope_family=data.get("envelope_family", "voxel"),
         roof_angle_span_deg=data.get("roof_angle_span_deg", 15.0),
         roof_angle_step_deg=data.get("roof_angle_step_deg", 7.5),
@@ -258,8 +288,9 @@ def _build_options(data: dict | None) -> OptimizeOptions:
 def load_project(path: str) -> Project:
     with open(path, encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
-    site, notes = _build_site(data["site"])
-    shadow = _build_shadow(data.get("shadow"))
+    profile = _build_profile(data)
+    site, notes = _build_site(data["site"], profile)
+    shadow = _build_shadow(data.get("shadow"), profile)
     if shadow is not None:
         # 用途地域が分かるここで、別表第四（は）欄に照らして測定面を検証する。
         validate_measurement_height(
@@ -269,8 +300,9 @@ def load_project(path: str) -> Project:
         )
     return Project(
         site=site,
-        options=_build_options(data.get("mesh")),
+        options=_build_options(data.get("mesh"), profile),
         shadow=shadow,
         output=OutputSettings(**(data.get("output") or {})),
-        notes=notes,
+        profile=profile,
+        notes=notes + profile.describe_ja(),
     )

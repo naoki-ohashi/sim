@@ -3,6 +3,29 @@
 # 30m x 20m の敷地。南に6m道路、東西が隣地、北は水路（幅4m）に接する想定。
 # 数値はすべて例です。実際の敷地では都市計画図と自治体の条例で確認してください。
 
+# --- プロファイル（運用差と解釈の選択）--------------------------------
+# 省略すると条文だけの statutory（行政庁の運用も選択規定も使わない保守側）。
+# 組み込みの名前・YAMLのパス・その場の定義のいずれでも書けます。
+#
+#   profile: statutory
+#   profile: ./profiles/○○市.yaml
+#   profile:
+#     name: ○○市
+#     source:                        # statutory 以外は**必須**（原則F）
+#       document: ○○市建築基準法施行細則
+#       confirmed_on: 2026-08-30
+#       url: https://...
+#     railway_is_adjacent_relaxation: true   # 令135条の3第1項1号の運用
+#     park_is_deemed_boundary: true          # 令135条の12第3項1号の運用
+#     apply_article_134_2: true              # 令134条2項（選択規定）
+#     ground_average_method: length_weighted # 令2条2項の「平均の高さ」
+#     sky_reference_layers: 20               # 適合建築物の層数（精度）
+#     sky_azimuth_count: 72                  # 天空率の方位分割（精度）
+#     sky_measurement_interval_m:            # null なら条文の間隔
+#
+# 敷地側（site: の下）に同じ項目を書くと、そちらが優先します。
+# プロファイルは既定を配るだけです。
+
 site:
   name: サンプル敷地
 

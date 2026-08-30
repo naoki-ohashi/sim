@@ -185,6 +185,7 @@ def build_sky_index(
     max_interval_m: float | None = None,
     n_azimuth: int = DEFAULT_N_AZIMUTH,
     references: dict[str, list[Block]] | None = None,
+    reference_layers: int = 20,
     azimuth_offset_ratio: float = AZIMUTH_OFFSET_RATIO,
 ) -> SkyIndex:
     """入射距離のインデックスを作り、適合建築物の天空率を求める。"""
@@ -193,7 +194,7 @@ def build_sky_index(
     ).reshape(-1, 4)
 
     if references is None:
-        references = reference_buildings(site)
+        references = reference_buildings(site, n_layers=reference_layers)
 
     samples = measurement_points(site, max_interval_m)
     points = [s.point for s in samples]
