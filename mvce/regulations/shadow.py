@@ -259,16 +259,93 @@ def measurement_points(site: Site, spec: ShadowRegulationSpec, distance_m: float
     return [tuple(line.interpolate(length * i / count).coords[0]) for i in range(count)]
 
 
+# === 令135条の12第3項第2号（高低差緩和）==============================
+
+def shadow_average_ground_level_m(site: Site) -> float:
+    """日影規制の平均地盤面。
+
+    別表第四の備考:
+
+    > この表において、平均地盤面からの高さとは、当該建築物が周囲の地面と
+    > 接する位置の平均の高さにおける水平面からの高さをいうものとする。
+
+    **令2条2項と違い「高低差三メートル以内ごと」の区分がありません。**
+    高低差が何メートルあっても日影の平均地盤面は敷地全体で1つです
+    （照合台帳の食い違い T）。なので `ground.ground_plane()` ではなく
+    `average_ground_level()` を直に使います。
+
+    地盤の高さが与えられていなければ 0.0（平坦地）。
+    """
+    from ..ground import average_ground_level
+
+    if site.ground_levels is None:
+        return 0.0
+    return average_ground_level(site.ground_contour(), closed=True)
+
+
+def deemed_average_ground_level_m(site: Site) -> tuple[float, list[str]]:
+    """令135条の12第3項第2号・第4項の適用後の平均地盤面。`(高さ, 説明)`。
+
+    第2号は「敷地の平均地盤面が隣地等の地盤面より**1m以上低い**場合」に
+    `(高低差 − 1) / 2` だけ高い位置にあるものとみなします。第4項の
+    特定行政庁の定めがあればそちらが優先します。
+    """
+    base = shadow_average_ground_level_m(site)
+    relax = site.shadow_ground
+    notes: list[str] = []
+
+    if relax.designated_level_m is not None:
+        notes.append(
+            f"令135条の12第4項: 特定行政庁の定めにより、平均地盤面を"
+            f"{relax.designated_level_m:+.3f}m として日影を判定します"
+            f"（本来の平均地盤面 {base:+.3f}m）。"
+        )
+        return relax.designated_level_m, notes
+
+    if relax.neighbour_level_m is None:
+        return base, notes
+
+    diff = relax.neighbour_level_m - base
+    if diff < 1.0:
+        notes.append(
+            f"令135条の12第3項第2号: 敷地の平均地盤面 {base:+.3f}m と"
+            f"隣地等の地盤面 {relax.neighbour_level_m:+.3f}m の高低差が"
+            f"{diff:.2f}mで1m未満のため、高低差緩和はありません。"
+        )
+        return base, notes
+
+    lift = (diff - 1.0) / 2.0
+    notes.append(
+        f"令135条の12第3項第2号: 敷地の平均地盤面 {base:+.3f}m が隣地等の"
+        f"地盤面 {relax.neighbour_level_m:+.3f}m より{diff:.2f}m低いため、"
+        f"({diff:.2f}−1)/2 = {lift:.3f}m だけ高い位置にあるものとみなします"
+        f"（みなし平均地盤面 {base + lift:+.3f}m）。"
+    )
+    return base + lift, notes
+
+
+def measurement_plane_z_m(site: Site, spec: "ShadowRegulationSpec") -> float:
+    """測定面の高さ（Z）。
+
+    別表第四（は）欄の測定面は「平均地盤面からの高さ」なので、
+    令135条の12第3項第2号のみなし平均地盤面のぶんだけ上がります。
+    平坦地・緩和なしなら `spec.measurement_height_m` そのままです。
+    """
+    return deemed_average_ground_level_m(site)[0] + spec.measurement_height_m
+
+
 def _point_in_block_shadow(
     point: Point, block: Block, altitude_deg: float, azimuth_deg: float,
-    measurement_height_m: float, site: Site,
+    plane_z_m: float, site: Site,
 ) -> bool:
     """測定面の高さで、点が1つのブロックの影に入っているか。
 
     測定面より低い部分は影を落とさないので、有効な高さは
-    (ブロック頂部 - 測定面高さ) になります。
+    (ブロック頂部 - 測定面のZ) になります。`plane_z_m` は
+    `measurement_plane_z_m()` の値で、令135条の12第3項第2号の
+    みなし平均地盤面を含みます。
     """
-    effective_height = block.z_top - measurement_height_m
+    effective_height = block.z_top - plane_z_m
     if effective_height <= 0:
         return False
     shift_len = effective_height / math.tan(math.radians(altitude_deg))
@@ -286,6 +363,7 @@ def compute_shadow_hours(
     declination = solar_declination_deg(day_of_year(*WINTER_SOLSTICE))
     hours = spec.true_solar_hours()
     step = spec.time_step_minutes / 60.0
+    plane_z = measurement_plane_z_m(site, spec)
 
     lines = [
         ShadowLineResult(5.0, spec.line_5m_max_hours, []),
@@ -306,7 +384,7 @@ def compute_shadow_hours(
                 for i, point in enumerate(pts):
                     for block in blocks:
                         if _point_in_block_shadow(
-                            point, block, altitude, azimuth, spec.measurement_height_m, site
+                            point, block, altitude, azimuth, plane_z, site
                         ):
                             accumulated[i] += step
                             break

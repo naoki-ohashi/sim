@@ -7,6 +7,13 @@
  *   geometry.js 相当        → 幾何ユーティリティ
  *   mvce/zoning.py           → ZONING（用途地域テーブル）
  *   mvce/far.py              → computeFar（法52条2項・9項＋令135条の18）
+ *
+ * ブラウザ版が持っていないもの（Python 版のみ）:
+ *   - 令2条2項の平均地盤面（mvce/ground.py）
+ *   - 法52条7項・法53条2項の按分（mvce/zone_split.py）
+ *   - 令135条の12第3項第2号の日影の高低差緩和
+ * これらを含む YAML は app.js が読み込みを拒否します（黙って無視すると
+ * 数字が間違うため）。測定面のZは常に spec.measurementHeightM です。
  *   mvce/regulations/*.py    → heightLimitAt ほか（斜線制限と緩和）
  *   mvce/mesh.py             → buildMesh
  *   mvce/index/shadow_index.py     → buildShadowIndex（しきい値高さ）

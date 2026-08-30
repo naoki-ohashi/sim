@@ -30,7 +30,7 @@ import numpy as np
 
 from ..geometry import Point
 from ..mesh import BuildableArea
-from ..regulations.shadow import ShadowRegulationSpec
+from ..regulations.shadow import ShadowRegulationSpec, measurement_plane_z_m
 from .shadow_index import grid_shadow_hours
 from ..site import Site
 from ..solar import solar_position_deg, winter_solstice_declination_deg
@@ -54,7 +54,8 @@ _CASE_EDGES: dict[int, list[tuple[int, int]] | str] = {
 }
 
 
-def _default_grid_margin_m(spec: ShadowRegulationSpec, max_height_m: float) -> float:
+def _default_grid_margin_m(spec: ShadowRegulationSpec, max_height_m: float,
+                           plane_z_m: float | None = None) -> float:
     """建物高さと冬至の最低太陽高度から、影が届きうる最大水平距離を見積もる。
 
     等時間日影図のグリッドが敷地の外側にどれだけ広がっている必要が
@@ -68,7 +69,10 @@ def _default_grid_margin_m(spec: ShadowRegulationSpec, max_height_m: float) -> f
         if altitude > 0 and (min_altitude is None or altitude < min_altitude):
             min_altitude = altitude
 
-    effective_height = max_height_m - spec.measurement_height_m
+    # 測定面のZ（令135条の12第3項第2号のみなし平均地盤面を含む）。
+    # 省略時は平坦地として測定面高さそのもの。
+    plane = spec.measurement_height_m if plane_z_m is None else plane_z_m
+    effective_height = max_height_m - plane
     if min_altitude is None or effective_height <= 0:
         return _FALLBACK_MARGIN_M
     return effective_height / math.tan(math.radians(min_altitude))
@@ -197,7 +201,8 @@ def site_isochrones(
 
     heights = np.asarray(floors, dtype=float) * site.floor_height_m
     max_height = float(heights.max()) if heights.size else 0.0
-    margin = margin_m if margin_m is not None else _default_grid_margin_m(spec, max_height)
+    margin = margin_m if margin_m is not None else _default_grid_margin_m(
+        spec, max_height, measurement_plane_z_m(site, spec))
 
     xs = [p[0] for p in site.points]
     ys = [p[1] for p in site.points]

@@ -561,6 +561,10 @@ def optimize(
     far = compute_far(site)
     notes: list[str] = []
     notes.extend(_ground_plane_notes(site))
+    if shadow_spec is not None:
+        from ..regulations.shadow import deemed_average_ground_level_m
+
+        notes.extend(deemed_average_ground_level_m(site)[1])
 
     area = build_mesh(
         site,

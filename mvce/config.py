@@ -23,7 +23,7 @@ from .io.site_json import read_site_plan_json
 from .north import NorthReference
 from .solvers.optimizer import OptimizeOptions
 from .regulations.shadow import ShadowRegulationSpec
-from .site import Site
+from .site import ShadowGroundRelaxation, Site
 from .zone_split import ZonePart, ZoneSplit
 from .zoning import ZoningParams, validate_measurement_height
 
@@ -170,8 +170,19 @@ def _build_site(data: dict) -> tuple[Site, list[str]]:
         railway_is_adjacent_relaxation=data.get("railway_is_adjacent_relaxation", False),
         ground_levels=data.get("ground_levels"),
         zone_split=_build_zone_split(data.get("zone_split")),
+        shadow_ground=_build_shadow_ground(data.get("shadow_ground")),
     )
     return site, notes
+
+
+def _build_shadow_ground(data: dict | None) -> ShadowGroundRelaxation | None:
+    """`shadow_ground:` から令135条の12第3項第2号・第4項の入力を作る。"""
+    if not data:
+        return None
+    return ShadowGroundRelaxation(
+        neighbour_level_m=data.get("neighbour_level_m"),
+        designated_level_m=data.get("designated_level_m"),
+    )
 
 
 def _build_shadow(data: dict | None) -> ShadowRegulationSpec | None:

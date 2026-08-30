@@ -124,6 +124,45 @@ class SpecifiedRoad:
 
 
 @dataclass
+class ShadowGroundRelaxation:
+    """日影規制の高低差緩和（令135条の12第3項第2号・第4項）。
+
+        三　法第五十六条の二第三項の規定による同条第一項本文の規定の適用の
+        緩和に関する措置は、次の各号に定めるところによる。
+        二　建築物の敷地の平均地盤面が隣地又はこれに連接する土地で日影の
+        生ずるものの地盤面（隣地又はこれに連接する土地に建築物がない場合に
+        おいては、当該隣地又はこれに連接する土地の平均地表面をいう。）より
+        一メートル以上低い場合においては、その建築物の敷地の平均地盤面は、
+        当該高低差から一メートルを減じたものの二分の一だけ高い位置に
+        あるものとみなす。
+
+    敷地の平均地盤面が高い位置にあるとみなされると、そこから測る測定面
+    （1.5m / 4m / 6.5m）も上がるので、日影が短くなります。
+
+    - `neighbour_level_m` … 隣地または連接する土地で日影の生ずるものの
+      地盤面（建築物が無ければ平均地表面）。`ground_levels` と同じ基準の
+      標高です。`None` なら緩和を見込みません（保守側）。
+
+      **複数の隣地で高さが違うときは一番低いものを入れてください。**
+      隣地が低いほど高低差が小さく、緩和も小さくなるので安全側です。
+
+    - `designated_level_m` … 第4項で特定行政庁が規則で定めた平均地盤面の
+      位置。定めがあるときだけ入れます。第2号の計算より優先します。
+
+    斜線の高低差緩和（令135条の2・3・4、`Boundary.ground_level_diff_m`）とは
+    **別の条文**です。あちらは境界線ごと、こちらは敷地の平均地盤面全体に
+    かかります。
+    """
+
+    neighbour_level_m: Optional[float] = None
+    designated_level_m: Optional[float] = None
+
+    @property
+    def active(self) -> bool:
+        return self.neighbour_level_m is not None or self.designated_level_m is not None
+
+
+@dataclass
 class Boundary:
     """敷地の1辺と、その規制上の役割。
 
@@ -223,6 +262,10 @@ class Site:
     #: **選択規定**なので、明示的に True にしたときだけ適用します。
     #: 既定の False は令132条1項によるということで、保守側です。
     apply_article_134_2: bool = False
+
+    #: 日影規制の高低差緩和（令135条の12第3項第2号・第4項）。
+    #: 既定は緩和なし。斜線の高低差緩和とは別の条文です。
+    shadow_ground: ShadowGroundRelaxation = field(default_factory=ShadowGroundRelaxation)
 
     #: 敷地が用途地域の2以上にわたる場合の区分（法52条7項・法53条2項）。
     #: `None` なら `zoning` 1つ。容積率・建蔽率はここから面積按分します。
@@ -363,6 +406,7 @@ class Site:
         railway_is_adjacent_relaxation: bool = False,
         ground_levels: Optional[Sequence[float]] = None,
         zone_split: Optional[ZoneSplit] = None,
+        shadow_ground: Optional[ShadowGroundRelaxation] = None,
     ) -> "Site":
         """頂点列と辺の設定（dict）から Site を作る。
 
@@ -414,6 +458,7 @@ class Site:
             railway_is_adjacent_relaxation=railway_is_adjacent_relaxation,
             ground_levels=tuple(levels) if levels is not None else None,
             zone_split=zone_split,
+            shadow_ground=shadow_ground or ShadowGroundRelaxation(),
         )
 
 

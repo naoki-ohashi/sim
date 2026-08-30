@@ -34,7 +34,11 @@ import numpy as np
 
 from ..geometry import Point
 from ..mesh import BuildableArea
-from ..regulations.shadow import ShadowRegulationSpec, measurement_points
+from ..regulations.shadow import (
+    ShadowRegulationSpec,
+    measurement_plane_z_m,
+    measurement_points,
+)
 from ..site import Site
 from ..solar import WINTER_SOLSTICE, day_of_year, solar_declination_deg, solar_position_deg
 
@@ -199,6 +203,7 @@ def grid_shadow_hours(
     ).reshape(-1, 4)
     _hours, sun, _azimuths = _sun_table(site, spec)
     step = spec.time_step_minutes / 60.0
+    plane_z = measurement_plane_z_m(site, spec)
     heights = np.asarray(floors, dtype=float) * site.floor_height_m
     origins = np.array(grid_points, dtype=float).reshape(-1, 2)
     n_points = len(origins)
@@ -211,7 +216,7 @@ def grid_shadow_hours(
         if direction is None:
             continue
         r = _ray_entry_distances_batch(origins, direction, boxes)   # (n_points, n_cells)
-        thresh = spec.measurement_height_m + r * tan_alt
+        thresh = plane_z + r * tan_alt
         shadowed_now = np.any(heights[None, :] >= thresh, axis=1)   # (n_points,)
         shadowed_hours += shadowed_now * step
 
@@ -228,6 +233,7 @@ def build_shadow_index(
 
     hours, sun, sun_azimuths_deg = _sun_table(site, spec)
     step = spec.time_step_minutes / 60.0
+    plane_z = measurement_plane_z_m(site, spec)
 
     points = {d: measurement_points(site, spec, d) for d in (5.0, 10.0)}
     thresholds: dict[float, list[np.ndarray]] = {}
@@ -242,7 +248,7 @@ def build_shadow_index(
                     continue
                 # 測定点から太陽の方向へ半直線を伸ばし、各マスまでの距離を測る
                 r = _ray_entry_distances(origin, direction, boxes)
-                table[ti] = spec.measurement_height_m + r * tan_alt
+                table[ti] = plane_z + r * tan_alt
             per_point.append(table)
         thresholds[distance] = per_point
 

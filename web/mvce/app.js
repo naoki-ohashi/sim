@@ -518,6 +518,13 @@
         + 'ブラウザ版は令2条2項の平均地盤面に対応していないので、'
         + 'Python 版（mvce コマンド）を使ってください。');
     }
+    if (/^\s*shadow_ground:/m.test(text)) {
+      throw new Error(
+        'この設定は日影の高低差緩和（shadow_ground、令135条の12第3項第2号）を'
+        + '持っています。ブラウザ版は未対応で、読み込むと緩和を見込まない'
+        + '厳しい側の結果になります。Python 版（mvce コマンド）を'
+        + '使ってください。');
+    }
     resetPlanView();
     const num = re => { const m = text.match(re); return m ? parseFloat(m[1]) : null; };
     const str = re => { const m = text.match(re); return m ? m[1].trim() : null; };
