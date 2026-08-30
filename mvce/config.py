@@ -24,7 +24,7 @@ from .north import NorthReference
 from .solvers.optimizer import OptimizeOptions
 from .regulations.shadow import ShadowRegulationSpec
 from .site import Site
-from .zoning import ZoningParams
+from .zoning import ZoningParams, validate_measurement_height
 
 
 @dataclass
@@ -54,6 +54,10 @@ def _build_zoning(data: dict) -> ZoningParams:
         far_ratio=_ratio(data["far_ratio"]),
         coverage_ratio=_ratio(data["coverage_ratio"]),
         absolute_height_limit_m=data.get("absolute_height_limit_m"),
+        # 用途地域の指定のない区域でだけ要る2つ。別表第三 五の項と
+        # 別表第四 四の項が特定行政庁／条例の指定に委ねている部分。
+        unspecified_road_slant_slope=data.get("unspecified_road_slant_slope"),
+        unspecified_shadow_row=data.get("unspecified_shadow_row"),
     )
 
 
@@ -186,10 +190,18 @@ def load_project(path: str) -> Project:
     with open(path, encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
     site, notes = _build_site(data["site"])
+    shadow = _build_shadow(data.get("shadow"))
+    if shadow is not None:
+        # 用途地域が分かるここで、別表第四（は）欄に照らして測定面を検証する。
+        validate_measurement_height(
+            site.zoning.zone_type,
+            shadow.measurement_height_m,
+            site.zoning.unspecified_shadow_row,
+        )
     return Project(
         site=site,
         options=_build_options(data.get("mesh")),
-        shadow=_build_shadow(data.get("shadow")),
+        shadow=shadow,
         output=OutputSettings(**(data.get("output") or {})),
         notes=notes,
     )

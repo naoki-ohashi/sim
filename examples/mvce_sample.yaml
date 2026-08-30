@@ -61,10 +61,22 @@ site:
 
   # --- 用途地域など ---------------------------------------------------
   zoning:
-    zone_type: 1res         # 選択肢は mve/zoning.py の ZONE_LABELS_JA を参照
+    zone_type: 1res         # 選択肢は mvce/zoning.py の ZONE_LABELS_JA を参照
     far_ratio: 200          # 容積率(%)。比(2.0)で書いてもOK
     coverage_ratio: 60      # 建蔽率(%)
     # absolute_height_limit_m: 10   # 低層住居専用等の絶対高さ制限
+    #
+    # 以下2つは zone_type: unspecified（用途地域の指定のない区域）でだけ要ります。
+    # どちらも条文が特定行政庁・条例の指定に委ねているので、既定値がありません。
+    # 指定しないまま計算しようとすると UndeterminedRegulation で止まります。
+    #
+    # 別表第三 五の項: 道路斜線の勾配（1.25 か 1.5）
+    # unspecified_road_slant_slope: 1.5
+    #
+    # 別表第四 四の項: 日影規制がイかロか
+    #   i  … 軒高7m超 または 地階を除く階数3以上 / 測定面 1.5m
+    #   ro … 高さ10m超 / 測定面 4m
+    # unspecified_shadow_row: ro
 
   floor_height_m: 3.2
 

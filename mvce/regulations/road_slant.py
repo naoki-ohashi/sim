@@ -116,7 +116,8 @@ def detail_at(site: Site, point: Point, edge_index: int) -> RoadSlantDetail:
     if not edge.is_road:
         raise ValueError("道路境界線ではありません")
 
-    tier = road_slant_tier(site.zoning.zone_type, site.zoning.far_ratio)
+    tier = road_slant_tier(site.zoning.zone_type, site.zoning.far_ratio,
+                           site.zoning.unspecified_road_slant_slope)
     applied_width, widened = applied_width_at(site, point, edge)
     s = point_line_distance(point, edge.p1, edge.p2)
     extra = _relaxation_extra(edge)
@@ -198,7 +199,8 @@ def required_setback_for_height(site: Site, edge_index: int, height_m: float) ->
     if not edge.is_road or height_m <= 0:
         return 0.0
 
-    tier = road_slant_tier(site.zoning.zone_type, site.zoning.far_ratio)
+    tier = road_slant_tier(site.zoning.zone_type, site.zoning.far_ratio,
+                           site.zoning.unspecified_road_slant_slope)
     # 幅員は最も不利（読み替えなし）の値で見る。読み替えは点ごとの判定なので、
     # ここでは安全側に実幅員を使う。
     base = edge.road_width_m + edge.wall_setback_m + _relaxation_extra(edge)

@@ -1,0 +1,234 @@
+"""別表第三・別表第四の条文値を直接検証する（第10.1節「条文基準値テスト」）。
+
+期待値は `docs/mvce/statutes/建築基準法.md` に収録した原文から取っています。
+基本設計書の表からではありません（第0章の指示）。
+"""
+import pytest
+
+from mvce.regulations.shadow import DEEMED_BOUNDARY_KINDS, ShadowRegulationSpec, deemed_boundary_offsets
+from mvce.site import Boundary, BoundaryKind, RelaxationKind, Site
+from mvce.zoning import (
+    EAVES_OR_STOREYS,
+    SHADOW_EXEMPT_ZONES,
+    TOTAL_HEIGHT,
+    UndeterminedRegulation,
+    ZoningParams,
+    allowed_measurement_heights_m,
+    is_shadow_target,
+    road_slant_row,
+    road_slant_tier,
+    shadow_table_row,
+)
+
+# --- 別表第三 -------------------------------------------------------------
+
+#: (用途地域, 容積率, 適用距離, 勾配)。原文の全段を並べる。
+TABLE3_ROW1 = [(2.0, 20.0), (3.0, 25.0), (4.0, 30.0), (5.0, 35.0), (13.0, 35.0)]
+TABLE3_ROW2 = [(4.0, 20.0), (6.0, 25.0), (8.0, 30.0), (10.0, 35.0),
+               (11.0, 40.0), (12.0, 45.0), (13.0, 50.0)]
+TABLE3_ROW3 = [(2.0, 20.0), (3.0, 25.0), (4.0, 30.0), (5.0, 35.0), (13.0, 35.0)]
+TABLE3_ROW5 = [(2.0, 20.0), (3.0, 25.0), (4.0, 30.0), (13.0, 30.0)]
+
+
+@pytest.mark.parametrize("zone", ["1low", "2low", "denen", "1mid", "2mid",
+                                  "1res", "2res", "quasi_res"])
+def test_row1_zones(zone):
+    """一の項: 低層住専・中高層住専・田園住居・住居系。勾配 1.25、上限 35m。"""
+    assert road_slant_row(zone) == 1
+    for far, distance in TABLE3_ROW1:
+        tier = road_slant_tier(zone, far)
+        assert (tier.applicable_distance_m, tier.slope) == (distance, 1.25)
+
+
+@pytest.mark.parametrize("zone", ["neighbor_commercial", "commercial"])
+def test_row2_zones(zone):
+    """二の項: 近隣商業・商業。勾配 1.5、7段で上限 50m。"""
+    assert road_slant_row(zone) == 2
+    for far, distance in TABLE3_ROW2:
+        tier = road_slant_tier(zone, far)
+        assert (tier.applicable_distance_m, tier.slope) == (distance, 1.5)
+
+
+@pytest.mark.parametrize("zone", ["quasi_industrial", "industrial", "industrial_exclusive"])
+def test_row3_zones(zone):
+    """三の項: 準工業・工業・工業専用。勾配は 1.5 だが距離は一の項と同じ刻み。
+
+    ここが二の項と取り違えられていた箇所（食い違い Q）。二の項なら
+    400% で 20m だが、三の項では 30m。
+    """
+    assert road_slant_row(zone) == 3
+    for far, distance in TABLE3_ROW3:
+        tier = road_slant_tier(zone, far)
+        assert (tier.applicable_distance_m, tier.slope) == (distance, 1.5)
+
+
+def test_row3_is_not_row2():
+    """三の項に二の項の表を当てていないことを、差が出る点で固定する。"""
+    for far, expected in [(3.0, 25.0), (4.0, 30.0), (5.0, 35.0)]:
+        assert road_slant_tier("quasi_industrial", far).applicable_distance_m == expected
+        # 二の項ならこうなってしまう
+        assert road_slant_tier("commercial", far).applicable_distance_m != expected
+
+
+def test_row5_distances():
+    """五の項: 無指定。3段で上限 30m。"""
+    assert road_slant_row("unspecified") == 5
+    for far, distance in TABLE3_ROW5:
+        tier = road_slant_tier("unspecified", far, 1.5)
+        assert tier.applicable_distance_m == distance
+
+
+def test_row5_slope_is_undetermined_without_a_designation():
+    """五の項の勾配は特定行政庁が定める。既定値で埋めない（原則H）。"""
+    with pytest.raises(UndeterminedRegulation):
+        road_slant_tier("unspecified", 3.0)
+
+
+@pytest.mark.parametrize("slope", [1.25, 1.5])
+def test_row5_accepts_either_designated_slope(slope):
+    assert road_slant_tier("unspecified", 3.0, slope).slope == slope
+
+
+def test_row5_rejects_other_slopes():
+    with pytest.raises(ValueError):
+        road_slant_tier("unspecified", 3.0, 2.5)
+
+
+def test_unknown_zone_is_rejected():
+    with pytest.raises(ValueError):
+        road_slant_row("nonesuch")
+
+
+def test_zoning_params_validates_the_unspecified_slope():
+    with pytest.raises(ValueError):
+        ZoningParams(zone_type="unspecified", far_ratio=2.0, coverage_ratio=0.6,
+                     unspecified_road_slant_slope=2.5)
+    ok = ZoningParams(zone_type="unspecified", far_ratio=2.0, coverage_ratio=0.6,
+                      unspecified_road_slant_slope=1.25)
+    assert ok.unspecified_road_slant_slope == 1.25
+
+
+# --- 別表第四 -------------------------------------------------------------
+
+def test_row1_measurement_plane_is_1_5m():
+    """一の項: 低層住専・田園住居 → 1.5m のみ。"""
+    for zone in ("1low", "2low", "denen"):
+        assert allowed_measurement_heights_m(zone) == (1.5,)
+        assert shadow_table_row(zone).criterion == EAVES_OR_STOREYS
+
+
+def test_row2_and_row3_measurement_planes():
+    """二の項・三の項 → 4m または 6.5m。"""
+    for zone in ("1mid", "2mid", "1res", "2res", "quasi_res",
+                 "neighbor_commercial", "quasi_industrial"):
+        assert allowed_measurement_heights_m(zone) == (4.0, 6.5)
+        assert shadow_table_row(zone).criterion == TOTAL_HEIGHT
+
+
+def test_row3_has_only_two_time_options():
+    """三の項には（三）が無い（法56条の2第1項の括弧書きと整合）。"""
+    for zone in ("1res", "2res", "quasi_res", "neighbor_commercial", "quasi_industrial"):
+        assert shadow_table_row(zone).time_options == ("一", "二")
+    for zone in ("1low", "1mid"):
+        assert shadow_table_row(zone).time_options == ("一", "二", "三")
+
+
+def test_row4_ro_has_no_6_5m():
+    """四の項ロの測定面は 4m のみ。6.5m は無い（食い違い R）。"""
+    assert allowed_measurement_heights_m("unspecified", "ro") == (4.0,)
+    assert 6.5 not in allowed_measurement_heights_m("unspecified", "ro")
+
+
+def test_row4_i_is_1_5m_and_eaves_based():
+    assert allowed_measurement_heights_m("unspecified", "i") == (1.5,)
+    assert shadow_table_row("unspecified", "i").criterion == EAVES_OR_STOREYS
+
+
+def test_unspecified_needs_the_ordinance_choice():
+    """イかロかが分からなければ判定しない（原則H）。"""
+    with pytest.raises(UndeterminedRegulation):
+        allowed_measurement_heights_m("unspecified")
+    with pytest.raises(UndeterminedRegulation):
+        is_shadow_target("unspecified", max_height_m=12.0)
+
+
+def test_zones_that_cannot_be_designated():
+    """商業・工業・工業専用は別表第四（い）欄に無い。"""
+    for zone in SHADOW_EXEMPT_ZONES:
+        assert shadow_table_row(zone) is None
+        assert allowed_measurement_heights_m(zone) == ()
+        assert not is_shadow_target(zone, max_height_m=100.0)
+
+
+# --- 別表第四（ろ）欄の対象建築物 ------------------------------------------
+
+def test_total_height_criterion():
+    assert not is_shadow_target("1mid", max_height_m=10.0)     # 「超える」
+    assert is_shadow_target("1mid", max_height_m=10.01)
+
+
+def test_eaves_criterion():
+    assert not is_shadow_target("1low", max_height_m=9.0, eaves_height_m=7.0)
+    assert is_shadow_target("1low", max_height_m=9.0, eaves_height_m=7.01)
+
+
+def test_storeys_criterion_is_an_or_not_an_and():
+    """「軒の高さが七メートルを超える**又は**地階を除く階数が三以上」。
+
+    軒高 6m の3階建ては条文上は対象。高さだけを見ていると取りこぼす
+    （食い違い S）。
+    """
+    assert is_shadow_target("1low", max_height_m=9.0,
+                            eaves_height_m=6.0, storeys_above_ground=3)
+    assert is_shadow_target("1low", max_height_m=9.0,
+                            eaves_height_m=8.0, storeys_above_ground=2)
+    assert not is_shadow_target("1low", max_height_m=9.0,
+                                eaves_height_m=6.0, storeys_above_ground=2)
+
+
+def test_unspecified_row_i_uses_the_eaves_criterion():
+    """四の項イの区域では 10m 以下でも対象になりうる（食い違い S）。"""
+    assert is_shadow_target("unspecified", max_height_m=9.0,
+                            eaves_height_m=8.0, unspecified_row="i")
+    # ロなら高さ基準なので対象外
+    assert not is_shadow_target("unspecified", max_height_m=9.0,
+                                eaves_height_m=8.0, unspecified_row="ro")
+
+
+# --- 令135条の12第3項第1号（食い違い C） ------------------------------------
+
+def _site_with(kind: RelaxationKind, width_m: float) -> Site:
+    return Site.from_rings(
+        [(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 20.0)],
+        [{"kind": "adjacent", "relaxation": {"kind": kind.value, "width_m": width_m}},
+         {"kind": "adjacent"}, {"kind": "adjacent"}, {"kind": "adjacent"}],
+        zoning=ZoningParams(zone_type="1res", far_ratio=2.0, coverage_ratio=0.6),
+    )
+
+
+def test_park_is_not_a_deemed_boundary_by_default():
+    """条文の列挙は「道路、水面、線路敷その他これらに類するもの」。"""
+    assert RelaxationKind.PARK not in DEEMED_BOUNDARY_KINDS
+    site = _site_with(RelaxationKind.PARK, 8.0)
+    assert deemed_boundary_offsets(site)[0] == 0.0
+
+
+def test_water_and_railway_are_deemed_boundaries():
+    for kind in (RelaxationKind.WATER, RelaxationKind.RAILWAY):
+        site = _site_with(kind, 8.0)
+        assert deemed_boundary_offsets(site)[0] == pytest.approx(4.0)
+
+
+def test_park_can_be_opted_in_for_authorities_that_allow_it():
+    site = _site_with(RelaxationKind.PARK, 8.0)
+    spec = ShadowRegulationSpec(measurement_height_m=4.0,
+                                line_5m_max_hours=4.0, line_10m_max_hours=2.5,
+                                park_is_deemed_boundary=True)
+    assert deemed_boundary_offsets(site, spec)[0] == pytest.approx(4.0)
+
+
+def test_the_ten_metre_rule_is_unchanged():
+    """幅10m以下は幅の1/2、10m超は反対側から敷地側5m（＝幅−5）。"""
+    assert deemed_boundary_offsets(_site_with(RelaxationKind.WATER, 6.0))[0] == pytest.approx(3.0)
+    assert deemed_boundary_offsets(_site_with(RelaxationKind.WATER, 10.0))[0] == pytest.approx(5.0)
+    assert deemed_boundary_offsets(_site_with(RelaxationKind.WATER, 14.0))[0] == pytest.approx(9.0)

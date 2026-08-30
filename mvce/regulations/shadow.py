@@ -36,12 +36,12 @@
 道路に接する敷地では、この緩和で測定線がかなり外へ出るため、日影規制の
 厳しさが実際にはだいぶ変わります。
 
-> **未決** — 条文が列挙するのは「道路、水面、線路敷その他これらに類する
-> もの」で、**公園・広場は明示されていません**。令134条（道路斜線）と
-> 令135条の3（隣地斜線）が「公園、広場、水面」と明示しているのとは対照的
-> です。`DEEMED_BOUNDARY_KINDS` は公園を含めていますが、これは「その他
-> これらに類するもの」に当たるという解釈であって、条文がそう書いている
-> わけではありません（`docs/mvce/legal_basis.md` の「食い違い C」）。
+> **公園は既定で対象外です。** 条文が列挙するのは「道路、水面、線路敷
+> その他これらに類するもの」で、公園・広場は入っていません。令134条
+> （道路斜線）と令135条の3（隣地斜線）が「公園、広場、水面」と明示して
+> いるのとは対照的で、書き分けられていると読むのが素直です。
+> 公園を含める運用の行政庁もあるので、その場合は
+> `ShadowRegulationSpec.park_is_deemed_boundary = True` にしてください。
 
 ## 5m/10mラインの取り方
 
@@ -81,10 +81,17 @@ from ..solar import (
 )
 
 
-# 令135条の12第3項第1号「道路、水面、線路敷その他これらに類するもの」。
-# 公園は条文に明示が無く、「これらに類するもの」に当たるという解釈で
-# 入れています（legal_basis.md の食い違い C）。判断が付いたら見直すこと。
-DEEMED_BOUNDARY_KINDS = {RelaxationKind.WATER, RelaxationKind.RAILWAY, RelaxationKind.PARK}
+# 令135条の12第3項第1号が列挙するのは
+# 「道路、水面、線路敷その他これらに類するもの」。
+#
+# **公園・広場は入っていません。** 令134条（道路斜線）と令135条の3
+# （隣地斜線）が「公園、広場、水面」と明示しているのとは対照的で、
+# 書き分けられていると読むのが素直です。条文どおり公園を外すのが既定。
+#
+# 公園を「その他これらに類するもの」に含める運用の行政庁もあるので、
+# `ShadowRegulationSpec.park_is_deemed_boundary` で明示的に有効にできます
+# （原則A: 方式差はコードの if ではなく設定で持つ）。
+DEEMED_BOUNDARY_KINDS = {RelaxationKind.WATER, RelaxationKind.RAILWAY}
 DEEMED_BOUNDARY_WIDTH_THRESHOLD_M = 10.0
 DEEMED_BOUNDARY_INSET_M = 5.0
 
@@ -106,7 +113,10 @@ class ShadowRegulationSpec:
     hokkaido: bool = False               # 北海道は9時〜15時
     time_step_minutes: float = 10.0
     sample_interval_m: float = 2.0       # 測定線上の点の間隔
-    apply_deemed_boundary: bool = True   # 令135条の12第3項の緩和を使うか
+    apply_deemed_boundary: bool = True   # 令135条の12第3項第1号の緩和を使うか
+    #: 公園・広場をみなし境界線の対象に含めるか。条文は列挙していないので
+    #: 既定は False。含める運用の行政庁に合わせるときだけ True にします。
+    park_is_deemed_boundary: bool = False
     #: 等時間日影図（等時間日影線）を作る時間のリスト（例: [2.0, 3.0, 4.0, 5.0]）。
     #: 空リスト（既定）なら作らない。`mvce/index/isochrone.py` を参照。
     isochrone_hours: list[float] = field(default_factory=list)
@@ -175,14 +185,20 @@ class ShadowLineResult:
         return self.max_hours - self.worst_hours
 
 
-def deemed_boundary_offsets(site: Site) -> list[float]:
-    """辺ごとの、令135条の12第3項によるみなし境界線の外側への移動量。"""
+def deemed_boundary_offsets(site: Site, spec: "ShadowRegulationSpec | None" = None) -> list[float]:
+    """辺ごとの、令135条の12第3項第1号によるみなし境界線の外側への移動量。
+
+    `spec` を省略すると条文どおり（公園は対象外）で計算します。
+    """
+    kinds = set(DEEMED_BOUNDARY_KINDS)
+    if spec is not None and spec.park_is_deemed_boundary:
+        kinds.add(RelaxationKind.PARK)
     offsets = []
     for edge in site.edges:
         width = 0.0
         if edge.is_road:
             width = edge.road_width_m
-        elif edge.relaxation.active and edge.relaxation.kind in DEEMED_BOUNDARY_KINDS:
+        elif edge.relaxation.active and edge.relaxation.kind in kinds:
             width = edge.relaxation.width_m
 
         if width <= 0:
@@ -226,7 +242,7 @@ def regulation_boundary(site: Site, spec: ShadowRegulationSpec) -> list[Point]:
     """日影規制の基準となる敷地境界線（みなし境界線を適用したもの）。"""
     if not spec.apply_deemed_boundary:
         return ensure_ccw(site.points)
-    return _offset_ring(site.points, deemed_boundary_offsets(site))
+    return _offset_ring(site.points, deemed_boundary_offsets(site, spec))
 
 
 def measurement_points(site: Site, spec: ShadowRegulationSpec, distance_m: float) -> list[Point]:

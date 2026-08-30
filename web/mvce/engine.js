@@ -177,14 +177,47 @@
     throw new Error('不明な用途地域: ' + z);
   }
 
-  const ROAD_SLANT_TABLE = {
-    residential: [[2.0, 20, 1.25], [3.0, 25, 1.25], [4.0, 30, 1.25], [null, 35, 1.25]],
-    other: [[4.0, 20, 1.5], [6.0, 25, 1.5], [8.0, 30, 1.5], [10.0, 35, 1.5],
-            [11.0, 40, 1.5], [12.0, 45, 1.5], [null, 50, 1.5]],
+  // 別表第三は5項あり、適用距離の刻みが3通り。住居系／その他の2群に
+  // まとめると三の項（準工業・工業・工業専用）と五の項（無指定）に
+  // 二の項（近隣商業・商業）の刻みを当ててしまう。Python版と同じ構造。
+  const ROAD_SLANT_ROW_BY_ZONE = {
+    '1low': 1, '2low': 1, denen: 1, '1mid': 1, '2mid': 1,
+    '1res': 1, '2res': 1, quasi_res: 1,
+    neighbor_commercial: 2, commercial: 2,
+    quasi_industrial: 3, industrial: 3, industrial_exclusive: 3,
+    unspecified: 5,
   };
-  function roadSlantTier(zone, far) {
-    for (const [upper, dist, slope] of ROAD_SLANT_TABLE[zoneGroup(zone)]) {
-      if (upper === null || far <= upper) return { dist, slope };
+  const ROAD_SLANT_TABLE = {
+    1: [[2.0, 20, 1.25], [3.0, 25, 1.25], [4.0, 30, 1.25], [null, 35, 1.25]],
+    2: [[4.0, 20, 1.5], [6.0, 25, 1.5], [8.0, 30, 1.5], [10.0, 35, 1.5],
+        [11.0, 40, 1.5], [12.0, 45, 1.5], [null, 50, 1.5]],
+    3: [[2.0, 20, 1.5], [3.0, 25, 1.5], [4.0, 30, 1.5], [null, 35, 1.5]],
+    // 四の項（高層住居誘導地区）は入力できないので到達しないが、表の写し。
+    4: [[null, 35, 1.5]],
+    // 五の項の勾配は「1.25 又は 1.5 のうち特定行政庁が定めるもの」。
+    5: [[2.0, 20, null], [3.0, 25, null], [null, 30, null]],
+  };
+  const UNSPECIFIED_ROAD_SLANT_SLOPES = [1.25, 1.5];
+
+  function roadSlantRow(zone) {
+    const row = ROAD_SLANT_ROW_BY_ZONE[zone];
+    if (row === undefined) throw new Error('不明な用途地域: ' + zone);
+    return row;
+  }
+  function roadSlantTier(zone, far, unspecifiedSlope) {
+    for (const [upper, dist, slope] of ROAD_SLANT_TABLE[roadSlantRow(zone)]) {
+      if (upper !== null && far > upper) continue;
+      if (slope !== null) return { dist, slope };
+      if (unspecifiedSlope === undefined || unspecifiedSlope === null) {
+        throw new Error(
+          '用途地域の指定のない区域の道路斜線勾配は、別表第三 五の項により ' +
+          '1.25 か 1.5 のうち特定行政庁が定めるものです。どちらか分からないため' +
+          '計算できません。zoning.unspecifiedRoadSlantSlope を指定してください');
+      }
+      if (!UNSPECIFIED_ROAD_SLANT_SLOPES.includes(unspecifiedSlope)) {
+        throw new Error('無指定区域の道路斜線勾配は 1.25 か 1.5 です: ' + unspecifiedSlope);
+      }
+      return { dist, slope: unspecifiedSlope };
     }
     throw new Error('unreachable');
   }
@@ -206,7 +239,10 @@
   const ROAD_RELAX = new Set(['park', 'water']);           // 令134条: 幅の全部
   const ADJACENT_RELAX = new Set(['park', 'water', 'railway']); // 令135条の3: 幅の1/2
   const NORTH_RELAX = new Set(['water', 'railway']);       // 令135条の4: 公園は対象外
-  const SHADOW_RELAX = new Set(['park', 'water', 'railway']);
+  // 令135条の12第3項第1号は「道路、水面、線路敷その他これらに類するもの」。
+  // 公園・広場は列挙されていないので既定では外す。含める運用の行政庁に
+  // 合わせるときは spec.parkIsDeemedBoundary = true。
+  const SHADOW_RELAX = new Set(['water', 'railway']);
 
   // ===== 法52条2項 ====================================================
   function maxRoadWidth(site) {
@@ -264,7 +300,8 @@
   function roadHeightLimit(site, point) {
     const roads = site.edges.filter(e => e.kind === 'road');
     if (!roads.length) return Infinity;
-    const tier = roadSlantTier(site.zoning.zoneType, site.zoning.farRatio);
+    const tier = roadSlantTier(site.zoning.zoneType, site.zoning.farRatio,
+      site.zoning.unspecifiedRoadSlantSlope);
     let limit = Infinity;
     for (const edge of roads) {
       const width = appliedRoadWidth(site, point, edge);
@@ -352,7 +389,8 @@
   function roadRequiredSetback(site, edgeIndex, heightM) {
     const edge = site.edges[edgeIndex];
     if (edge.kind !== 'road' || heightM <= 0) return 0;
-    const tier = roadSlantTier(site.zoning.zoneType, site.zoning.farRatio);
+    const tier = roadSlantTier(site.zoning.zoneType, site.zoning.farRatio,
+      site.zoning.unspecifiedRoadSlantSlope);
     const base = edge.roadWidthM + edge.wallSetbackM + relaxWidth(edge, ROAD_RELAX, false);
     const level = levelRelax(edge);
     const h0 = tier.slope * base + level;
@@ -770,11 +808,13 @@
 
   // ===== 日影 =========================================================
   // 令135条の12第3項: みなし境界線の外側への移動量
-  function deemedBoundaryOffsets(site) {
+  function deemedBoundaryOffsets(site, spec) {
+    const kinds = new Set(SHADOW_RELAX);
+    if (spec && spec.parkIsDeemedBoundary) kinds.add('park');
     return site.edges.map(edge => {
       let width = 0;
       if (edge.kind === 'road') width = edge.roadWidthM;
-      else if (edge.relaxation && SHADOW_RELAX.has(edge.relaxation.kind) && edge.relaxation.widthM > 0) {
+      else if (edge.relaxation && kinds.has(edge.relaxation.kind) && edge.relaxation.widthM > 0) {
         width = edge.relaxation.widthM;
       }
       if (width <= 0) return 0;
@@ -784,7 +824,7 @@
 
   function regulationBoundary(site, spec) {
     if (spec.applyDeemedBoundary === false) return ensureCCW(site.points);
-    return offsetRingOutward(site.points, deemedBoundaryOffsets(site));
+    return offsetRingOutward(site.points, deemedBoundaryOffsets(site, spec));
   }
 
   function shadowMeasurementPoints(site, spec, distanceM) {
@@ -900,7 +940,7 @@
     polygonArea, polygonSignedArea, ensureCCW, dedupeRing, pointLineDistance,
     interiorNormal, outwardNormal, offsetPolygonByEdgeDistances, offsetRingOutward, sampleRing,
     northVector, azimuthOfVector, vectorForAzimuth, facesNorth,
-    zoneGroup, roadSlantTier, adjacentSlantParams, northSlantParams,
+    zoneGroup, roadSlantRow, roadSlantTier, adjacentSlantParams, northSlantParams,
     computeFar, siteArea, maxBuildingArea, maxFloorArea, maxRoadWidth,
     appliedRoadWidth, roadHeightLimit, oppositeBoundaryLine, oppositeBoundaryLines,
     adjacentHeightLimit, northHeightLimit,
