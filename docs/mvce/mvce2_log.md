@@ -345,3 +345,63 @@ pyproj は `dev` extra です。入っていない環境では突合テストだ
 
 `Site` に `crs` フィールドが増えましたが、既定は `None` で、手描き図面
 から起こした敷地の挙動は変わりません。既存テストは全件緑のままです。
+
+
+---
+
+## SITEINFO と MVCE の関係（2026-08-30）
+
+SITEINFO は**敷地情報を入力するデータベースのカード**で、判定ロジックは
+持ちません（定義は `statutes/README.md`）。入力項目が MVCE の `Site` と
+ほぼ一致するので、対応を控えておきます。**SITEINFO が MvceRequest.site の
+上流**になる、という理解です。
+
+| SITEINFO の項目 | MVCE 側 | 状態 |
+|---|---|---|
+| 敷地の所在 | — | **MVCE に該当フィールドが無い** |
+| 敷地のかたち（三斜 / ポリゴン / 座標 / GeoJSON） | `Site.points` ＋ `Site.crs` | 形式の対応は下記 |
+| 方位 | `Site.north`（`north.resolve_north()`） | あり |
+| 用途地域 | `ZoningParams.zone_type` | あり |
+| 建蔽率 | `ZoningParams.coverage_ratio` | あり（緩和は未実装。食い違い M） |
+| 容積率 | `ZoningParams.far_ratio` | あり |
+| 前面道路幅員 | `Boundary.road_width_m`（辺ごと） | あり |
+| 日影規制 | `ShadowRegulationSpec` | あり |
+| 高さ規制 | `ZoningParams.absolute_height_limit_m` ＋ 高度地区 | 絶対高さのみ。**高度地区は Phase 1 で未実装** |
+
+### 気づいた点3つ
+
+**1. 敷地の所在を MVCE が持っていない**
+
+基本設計書 8.1 の `MvceRequest` は `municipality_code`（全国地方公共団体
+コード）を要求します。自治体 YAML（日影の規制時間・高度地区の勾配・
+特定行政庁が定める係数）を引くのに要るからです。SITEINFO の「所在」から
+それを導く経路が要ります。`Site` に住所フィールドを足すか、
+`MvceRequest` 側で受けるかは Phase 4 の設計です。
+
+**2. 敷地のかたちの入力形式**
+
+MVCE の `io/` が読めるのは DXF・CSV・JSON です。SITEINFO の4形式との
+対応は次のとおり。
+
+| 形式 | MVCE 側 | 備考 |
+|---|---|---|
+| 座標 | `io/site_csv.py` / `io/site_json.py` | そのまま |
+| ポリゴン | 同上 | そのまま |
+| GeoJSON | **無い** | 下記の注意あり |
+| 三斜（三斜求積） | **無い** | 三角形分割の求積表。頂点列への復元が要る |
+
+**3. GeoJSON は原則D に触れる**
+
+GeoJSON は既定で WGS84 の緯度経度です（RFC 7946）。原則D は
+「WGS84 緯度経度での面積計算は禁止」なので、**取り込みの時点で
+JGD2011 平面直角座標系へ変換**しなければなりません。
+
+`crs.py` の `zone_for_epsg()` は EPSG:4326 と EPSG:6668（JGD2011 地理座標）を
+明示的に弾いて「取り込み前に平面直角座標系へ変換してください」と言います。
+その番人はすでに立っていますが、**変換そのものは未実装**です。
+`crs.project()` は緯度経度 → 平面直角座標をやるので、JGD2011 の緯度経度
+なら繋げます。WGS84 → JGD2011 の測地系変換（数メートルのずれ）は
+別途必要です。
+
+三斜と GeoJSON をいつ実装するかは、SITEINFO 側でどの形式を実際に使うかが
+決まってからでよいと思います。
