@@ -26,14 +26,26 @@
 かかるので、12m未満の閾値も最大幅員の比較も加算後の値で見ます。L=0 のとき
 Ｗａ＝12−Ｗｒ でちょうど12mになり、そこで2項が外れるので不連続はありません。
 
-（特定行政庁が定める割増、法52条8項・10項〜14項は未対応です。該当しそうな
-場合は `notes` に注意書きが出ます。）
+## 法52条2項各号の括弧書き（特定行政庁が指定する区域）
+
+低減係数は号ごとに括弧書きを持ちます。**変わる向きが号で違います。**
+
+    一号 低層住専・田園住居 …… 4/10（括弧書きなし）
+    二号 中高層住専・住居系 …… 4/10（指定区域は 6/10）      → 緩和だけ
+    三号 その他             …… 6/10（指定区域は 4/10 又は 8/10）→ 強化もある
+
+三号の 4/10 が要注意で、指定を知らずに既定の 6/10 で計算すると**実際の限度の
+1.5倍**を許します。`ZoningParams.far_road_coefficient_designated` で指定でき、
+未指定なら `notes` に向き付きの注意書きが出ます。
+
+（法52条8項・10項〜14項は未対応です。該当しそうな場合は `notes` に
+注意書きが出ます。）
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .zoning import FAR_ROAD_COEFFICIENT, FAR_ROAD_WIDTH_THRESHOLD_M, zone_group
+from .zoning import FAR_ROAD_WIDTH_THRESHOLD_M, far_road_paragraph_2_item
 
 #: 法52条9項: 特定道路の幅員の下限
 SPECIFIED_ROAD_MIN_WIDTH_M = 15.0
@@ -186,7 +198,7 @@ def compute_far(site) -> FarResult:
         )
         return FarResult(designated, None, designated, max_width, None, notes, additions)
 
-    coefficient = FAR_ROAD_COEFFICIENT[zone_group(site.zoning.zone_type)]
+    coefficient = site.zoning.far_road_coefficient()
     road_far = max_width * coefficient
     effective = min(designated, road_far)
 
@@ -209,14 +221,49 @@ def compute_far(site) -> FarResult:
             "見ていません。幅員15m以上の道路に接続する前面道路（6m以上12m未満）"
             "に接している敷地では、その辺に特定道路の幅員と延長を入れてください。"
         )
+    notes.extend(_designation_notes(site, coefficient))
     notes.append(
-        "特定行政庁が定める割増（法52条2項各号の指定区域）や、"
-        "法52条8項・10項〜14項は未対応です。"
-        "該当する可能性がある場合は別途確認してください。"
+        "法52条8項（住宅の割増）・10項〜14項（計画道路・壁面線・許可）は"
+        "未対応です。該当する可能性がある場合は別途確認してください。"
     )
     return FarResult(
         designated, road_far, effective, max_width, coefficient, notes, additions,
     )
+
+
+_ITEM_JA = {1: "一", 2: "二", 3: "三"}
+
+
+def _designation_notes(site, coefficient: float) -> list[str]:
+    """法52条2項各号の括弧書き（指定区域）についての注意書き。
+
+    **向きを正しく言うことが大事です。** 二号（中高層住専・住居系）の指定は
+    4/10 → 6/10 の緩和なので、知らずに既定で計算しても厳しい側に出るだけです。
+    三号（その他）の指定は 6/10 → **4/10 または 8/10** で、4/10 なら
+    既定の 6/10 は実際の限度の1.5倍。**緩い側＝危険**です。
+    """
+    item = far_road_paragraph_2_item(site.zoning.zone_type)
+    if site.zoning.far_road_coefficient_designated is not None:
+        return [
+            f"法52条2項第{_ITEM_JA[item]}号の指定区域として、"
+            f"係数 {coefficient:.1f} を指定されています（括弧書き）。"
+        ]
+    if item == 1:
+        return []           # 一号に括弧書きは無い
+    if item == 2:
+        return [
+            "法52条2項第二号の指定区域（係数が4/10→6/10になる）には該当しない"
+            "ものとして計算しています。該当する場合は "
+            "far_road_coefficient_designated に 0.6 を指定してください"
+            "（容積率が上がります）。"
+        ]
+    return [
+        "⚠ 法52条2項第三号の指定区域（係数が6/10→**4/10 または 8/10**になる）"
+        "には該当しないものとして、6/10 で計算しています。"
+        "**4/10 の指定区域だと、この結果は実際の限度の1.5倍です。**"
+        "都市計画図で確認し、該当する場合は "
+        "far_road_coefficient_designated に 0.4 か 0.8 を指定してください。"
+    ]
 
 
 def _compute_far_split(site) -> FarResult:

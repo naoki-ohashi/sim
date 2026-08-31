@@ -48,9 +48,66 @@ def zone_group(zone_type: str) -> str:
 
 
 # --- 法52条2項: 前面道路幅員による容積率の低減係数 -------------------
-# 住居系 4/10、その他 6/10。特定行政庁が定める場合の割増は考慮していない。
+# 住居系 4/10、その他 6/10。
 FAR_ROAD_COEFFICIENT = {"residential": 0.4, "other": 0.6}
 FAR_ROAD_WIDTH_THRESHOLD_M = 12.0  # これ以上の幅員なら指定容積率のまま
+
+# 法52条2項は3号に分かれていて、括弧書きの「特定行政庁が指定する区域」で
+# 係数が変わります。**変わる向きが号によって違う**ので、群（住居系／その他）
+# だけでは足りません。
+#
+#   一号 低層住専・田園住居 …… 十分の四（括弧書き**なし**）
+#   二号 中高層住専・1住居・2住居・準住居
+#        …… 十分の四（指定区域では十分の六）        → 指定は**緩和**
+#   三号 その他 …… 十分の六（指定区域では十分の四**又は**十分の八）
+#                                                    → 指定は**緩和にも強化にもなる**
+#
+# 三号の 4/10 が問題です。指定を知らずに既定の 6/10 を使うと、実際の限度の
+# 1.5倍を許してしまいます（**緩い側＝危険**）。原則G のとおり、指定は入力
+# （`ZoningParams.far_road_coefficient_designated`）から受け取ります。
+
+#: 法52条2項の号（1 / 2 / 3）→ 括弧書きで指定されうる係数。
+#: 空タプルは括弧書きが無い号。
+FAR_ROAD_DESIGNATED_COEFFICIENTS: dict[int, tuple[float, ...]] = {
+    1: (),
+    2: (0.6,),
+    3: (0.4, 0.8),
+}
+
+
+def far_road_paragraph_2_item(zone_type: str) -> int:
+    """用途地域 → 法52条2項の号（1 / 2 / 3）。"""
+    if zone_type in LOW_RISE_ZONES:
+        return 1
+    if zone_type in MID_RISE_ZONES | OTHER_RESIDENTIAL_ZONES:
+        return 2
+    if zone_type in COMMERCIAL_ZONES | INDUSTRIAL_ZONES | UNSPECIFIED_ZONES:
+        return 3
+    raise ValueError(f"不明な用途地域: {zone_type!r}（有効な値: {sorted(ALL_ZONES)}）")
+
+
+def far_road_coefficient(zone_type: str, designated: float | None = None) -> float:
+    """法52条2項の低減係数。`designated` は括弧書きの指定区域の数値。
+
+    指定が無ければ各号の本文の値（一号・二号 4/10、三号 6/10）です。
+    """
+    item = far_road_paragraph_2_item(zone_type)
+    if designated is None:
+        return FAR_ROAD_COEFFICIENT[zone_group(zone_type)]
+    allowed = FAR_ROAD_DESIGNATED_COEFFICIENTS[item]
+    if designated not in allowed:
+        if not allowed:
+            raise ValueError(
+                f"{ZONE_LABELS_JA[zone_type]}は法52条2項第一号で、括弧書き"
+                "（特定行政庁が指定する区域）がありません。係数は常に4/10です。"
+                "far_road_coefficient_designated は指定しないでください"
+            )
+        raise ValueError(
+            f"{ZONE_LABELS_JA[zone_type]}は法52条2項第{item}号なので、"
+            f"指定区域の係数は {allowed} のいずれかです"
+            f"（指定値: {designated}）"
+        )
+    return designated
 
 
 # --- 別表第三: 道路斜線の適用距離と勾配 ------------------------------
@@ -709,6 +766,15 @@ class ZoningParams:
     #: 限度が 30/10 以下の場合は対象外です。
     adjacent_slant_2_5_designated: bool = False
 
+    #: 法52条2項各号の括弧書き。「特定行政庁が都道府県都市計画審議会の議を
+    #: 経て指定する区域」で定められた低減係数です。指定が無ければ None。
+    #:
+    #: **三号（近隣商業・商業・準工業・工業・工業専用・無指定）では 4/10 も
+    #: ありえます。** 本文は 6/10 なので、指定を知らずに既定で計算すると
+    #: 実際の限度の**1.5倍**を許してしまいます（緩い側）。指定区域かどうかは
+    #: 都市計画図で確認してください。
+    far_road_coefficient_designated: float | None = None
+
     def __post_init__(self) -> None:
         if self.zone_type not in ALL_ZONES:
             raise ValueError(f"不明な用途地域: {self.zone_type!r}（有効: {sorted(ALL_ZONES)}）")
@@ -740,6 +806,8 @@ class ZoningParams:
             raise ValueError(
                 f"fireproof は {FIREPROOF_GRADES} のいずれかです"
                 f"（指定値: {self.fireproof!r}）")
+        # 号ごとに許される値が違うので、ここで弾いておく（法52条2項各号）
+        far_road_coefficient(self.zone_type, self.far_road_coefficient_designated)
         if self.zone_type in LOW_RISE_ZONES:
             # 法55条1項:
             #   第一種低層住居専用地域、第二種低層住居専用地域又は田園住居地域
@@ -769,6 +837,11 @@ class ZoningParams:
     @property
     def label_ja(self) -> str:
         return ZONE_LABELS_JA[self.zone_type]
+
+    def far_road_coefficient(self) -> float:
+        """法52条2項の低減係数（括弧書きの指定を反映したもの）。"""
+        return far_road_coefficient(self.zone_type,
+                                    self.far_road_coefficient_designated)
 
     def coverage_limit(self) -> float | None:
         """法53条1項・3項・6項1号によるこの区域の建蔽率の限度。

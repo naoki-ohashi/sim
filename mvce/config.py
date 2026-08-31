@@ -72,7 +72,16 @@ def _build_zoning(data: dict) -> ZoningParams:
         fire_zone=data.get("fire_zone", "none"),
         fireproof=data.get("fireproof", "none"),
         corner_lot_designated=data.get("corner_lot_designated", False),
+        # 法52条2項各号の括弧書き（特定行政庁が指定する区域の低減係数）。
+        # 三号（近隣商業・商業・工業系・無指定）では 4/10 もありえるので、
+        # 未指定のまま既定の 6/10 で計算すると緩い側に出ます。
+        far_road_coefficient_designated=_optional_ratio(
+            data.get("far_road_coefficient_designated")),
     )
+
+
+def _optional_ratio(value):
+    return None if value is None else _ratio(value)
 
 
 def _build_zone_split(data) -> "ZoneSplit | None":

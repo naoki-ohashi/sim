@@ -67,11 +67,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .zoning import (
-    FAR_ROAD_COEFFICIENT,
     FAR_ROAD_WIDTH_THRESHOLD_M,
     UndeterminedRegulation,
     ZoningParams,
-    zone_group,
 )
 
 #: 面積の合計が敷地面積と一致しているとみなす相対誤差
@@ -159,8 +157,8 @@ def far_limit_for(zoning: ZoningParams, road_width_m: float) -> float:
     """
     if road_width_m <= 0 or road_width_m >= FAR_ROAD_WIDTH_THRESHOLD_M:
         return zoning.far_ratio
-    coefficient = FAR_ROAD_COEFFICIENT[zone_group(zoning.zone_type)]
-    return min(zoning.far_ratio, road_width_m * coefficient)
+    # 係数は法52条2項各号の括弧書き（指定区域）を反映したもの
+    return min(zoning.far_ratio, road_width_m * zoning.far_road_coefficient())
 
 
 def weighted_far_limit(split: ZoneSplit, road_width_m: float) -> tuple[float, list[str]]:

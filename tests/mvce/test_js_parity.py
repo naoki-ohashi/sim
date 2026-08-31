@@ -39,7 +39,7 @@ SQUARE = [(0.0, 0.0), (30.0, 0.0), (30.0, 20.0), (0.0, 20.0)]
 
 
 def _site(specs=None, zone="1res", far=2.0, coverage=0.6, north=0.0, setback=0.0,
-          height=None, shadow_designated=False):
+          height=None, shadow_designated=False, far_coefficient_designated=None):
     if specs is None:
         specs = [
             {"kind": "road", "road_width_m": 6.0, "wall_setback_m": setback},
@@ -50,7 +50,8 @@ def _site(specs=None, zone="1res", far=2.0, coverage=0.6, north=0.0, setback=0.0
     return Site.from_rings(
         SQUARE, specs,
         ZoningParams(zone, far, coverage, absolute_height_limit_m=height,
-                     shadow_ordinance_designated=shadow_designated),
+                     shadow_ordinance_designated=shadow_designated,
+                     far_road_coefficient_designated=far_coefficient_designated),
         north=NorthReference(north_angle_deg=north))
 
 
@@ -76,6 +77,8 @@ def _js_site(site):
             "unspecifiedAdjacentSlantSlope": site.zoning.unspecified_adjacent_slant_slope,
             "adjacentSlant25Designated": site.zoning.adjacent_slant_2_5_designated,
             "shadowOrdinanceDesignated": site.zoning.shadow_ordinance_designated,
+            "farRoadCoefficientDesignated":
+                site.zoning.far_road_coefficient_designated,
         },
         "northAngleDeg": site.north.north_angle_deg,
         "floorHeightM": site.floor_height_m,
@@ -134,6 +137,27 @@ def test_far_matches(zone, far, width):
         assert js["roadFar"] is None
     else:
         assert js["roadFar"] == pytest.approx(py.road_far)
+
+
+@pytest.mark.parametrize("zone,designated", [
+    ("commercial", 0.4), ("commercial", 0.8), ("commercial", None),
+    ("1res", 0.6), ("1res", None), ("1low", None),
+])
+def test_far_designated_coefficient_matches(zone, designated):
+    """法52条2項各号の括弧書き（指定区域の係数）が両実装で一致すること。
+
+    三号の 4/10 を片方だけ実装すると、ブラウザ版が Python 版の1.5倍の
+    容積率を出します。ずれたら落ちるようにしておきます。
+    """
+    specs = [{"kind": "road", "road_width_m": 8.0}, {"kind": "adjacent"},
+             {"kind": "adjacent"}, {"kind": "adjacent"}]
+    site = _site(specs, zone=zone, far=6.0,
+                 height=10.0 if zone == "1low" else None,
+                 far_coefficient_designated=designated)
+    js = _run_js({"want": ["far"], "site": _js_site(site)})["far"]
+    py = compute_far(site)
+    assert js["effective"] == pytest.approx(py.effective_far)
+    assert js["roadFar"] == pytest.approx(py.road_far)
 
 
 @pytest.mark.parametrize("front,spec_w,dist", [

@@ -175,6 +175,7 @@
 
   // ===== 用途地域 =====================================================
   const LOW_RISE = new Set(['1low', '2low', 'denen']);
+  const OTHER_RESIDENTIAL = new Set(['1res', '2res', 'quasi_res']);
   const RESIDENTIAL = new Set(['1low', '2low', 'denen', '1mid', '2mid', '1res', '2res', 'quasi_res']);
   const OTHER_GROUP = new Set(['neighbor_commercial', 'commercial', 'quasi_industrial',
     'industrial', 'industrial_exclusive', 'unspecified']);
@@ -292,6 +293,56 @@
   const FAR_ROAD_COEFFICIENT = { residential: 0.4, other: 0.6 };
   const FAR_ROAD_WIDTH_THRESHOLD_M = 12.0;
 
+  // 法52条2項は3号に分かれていて、括弧書きの「特定行政庁が指定する区域」で
+  // 係数が変わる。**変わる向きが号で違う**ので群だけでは足りない。
+  //   一号 低層住専・田園住居 … 4/10（括弧書きなし）
+  //   二号 中高層住専・住居系 … 4/10（指定区域は 6/10）        → 緩和だけ
+  //   三号 その他             … 6/10（指定区域は 4/10 又は 8/10）→ 強化もある
+  // 三号の 4/10 を知らずに既定の 6/10 で計算すると実際の限度の1.5倍になる。
+  const FAR_ROAD_DESIGNATED = { 1: [], 2: [0.6], 3: [0.4, 0.8] };
+  const FAR_ROAD_ITEM_JA = { 1: '一', 2: '二', 3: '三' };
+
+  function farRoadParagraph2Item(zoneType) {
+    if (LOW_RISE.has(zoneType)) return 1;
+    if (MID_RISE.has(zoneType) || OTHER_RESIDENTIAL.has(zoneType)) return 2;
+    return 3;
+  }
+
+  function farRoadCoefficient(zoneType, designated) {
+    const item = farRoadParagraph2Item(zoneType);
+    if (designated === null || designated === undefined) {
+      return FAR_ROAD_COEFFICIENT[zoneGroup(zoneType)];
+    }
+    const allowed = FAR_ROAD_DESIGNATED[item];
+    if (!allowed.includes(designated)) {
+      throw new Error(
+        `法52条2項第${FAR_ROAD_ITEM_JA[item]}号の指定区域の係数は`
+        + `${allowed.length ? allowed.join(' か ') : '（括弧書きなし）'}です`
+        + `（指定値: ${designated}）`);
+    }
+    return designated;
+  }
+
+  function farDesignationNotes(site, coefficient) {
+    const item = farRoadParagraph2Item(site.zoning.zoneType);
+    const designated = site.zoning.farRoadCoefficientDesignated;
+    if (designated !== null && designated !== undefined) {
+      return [`法52条2項第${FAR_ROAD_ITEM_JA[item]}号の指定区域として、`
+        + `係数 ${coefficient.toFixed(1)} を指定されています（括弧書き）。`];
+    }
+    if (item === 1) return [];
+    if (item === 2) {
+      return ['法52条2項第二号の指定区域（係数が4/10→6/10になる）には該当しない'
+        + 'ものとして計算しています。該当する場合は far_road_coefficient_designated に'
+        + ' 0.6 を指定してください（容積率が上がります）。'];
+    }
+    return ['⚠ 法52条2項第三号の指定区域（係数が6/10→**4/10 または 8/10**になる）'
+      + 'には該当しないものとして、6/10 で計算しています。'
+      + '**4/10 の指定区域だと、この結果は実際の限度の1.5倍です。**'
+      + '都市計画図で確認し、該当する場合は far_road_coefficient_designated に'
+      + ' 0.4 か 0.8 を指定してください。'];
+  }
+
   // 緩和対象（斜線ごとに違う。詳細は docs/mvce/legal_basis.md）
   // 4条文がそれぞれ違うものを列挙している。Python版の RelaxationKind の表を参照。
   // 令134条: 公園・広場・水面（線路敷は列挙なし、都市公園の除外も無い）
@@ -382,7 +433,8 @@
       notes.push(`前面道路の最大幅員が${width.toFixed(1)}mで12m以上のため、法52条2項による低減はありません。`);
       return { designated, roadFar: null, effective: designated, maxRoadWidthM: width, notes, specifiedRoadAdditions: additions };
     }
-    const coefficient = FAR_ROAD_COEFFICIENT[zoneGroup(site.zoning.zoneType)];
+    const coefficient = farRoadCoefficient(
+      site.zoning.zoneType, site.zoning.farRoadCoefficientDesignated);
     const roadFar = width * coefficient;
     const effective = Math.min(designated, roadFar);
     notes.push(`法52条2項: 前面道路の最大幅員${width.toFixed(1)}m × ${coefficient.toFixed(1)} = ${(roadFar * 100).toFixed(0)}%（指定容積率 ${(designated * 100).toFixed(0)}%）`);
@@ -392,7 +444,8 @@
     if (!hasAdditions) {
       notes.push('特定道路による緩和（法52条9項）は、特定道路を指定した辺がないため見ていません。幅員15m以上の道路に接続する前面道路（6m以上12m未満）に接している敷地では、その辺に特定道路の幅員と延長を入れてください。');
     }
-    notes.push('特定行政庁が定める割増（法52条2項各号の指定区域）や、法52条8項・10項〜14項は未対応です。該当する可能性がある場合は別途確認してください。');
+    for (const n of farDesignationNotes(site, coefficient)) notes.push(n);
+    notes.push('法52条8項（住宅の割増）・10項〜14項（計画道路・壁面線・許可）は未対応です。該当する可能性がある場合は別途確認してください。');
     return { designated, roadFar, effective, maxRoadWidthM: width, notes, specifiedRoadAdditions: additions };
   }
 
