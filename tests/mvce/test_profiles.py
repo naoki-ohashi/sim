@@ -203,3 +203,77 @@ def test_profile_feeds_the_optimize_options(tmp_path):
 def test_profile_appears_in_the_notes(tmp_path):
     notes = load_project(_write(tmp_path)).notes
     assert any("プロファイル: statutory" in n for n in notes)
+
+
+# === JCBA 報告書（平成22年）が挙げる5つの運用選択 =====================
+#
+# 報告書はいずれも「特定行政庁の判断に委ねられる」「いずれの運用も可能」と
+# しています。だからコードに直書きせず、プロファイルに置きます（原則A・G）。
+
+def test_corner_region_default_is_the_majority_operation():
+    """出隅の「2Aかつ35m」。既定は「広い道路に垂直」（街区主義）。
+
+    JCBA 報告書のアンケートで2/3、「基準総則・集団規定の適用事例」も同じ。
+    `road_regions.py` が辺の無限直線からの距離で切っているのがこれです。
+    """
+    assert STATUTORY_PROFILE.corner_region_method == "perpendicular"
+
+
+def test_the_arc_corner_method_is_refused():
+    """円弧状の区域区分（敷地主義）は未実装。名前だけ受けて中身が違うより止める。"""
+    with pytest.raises(UndeterminedRegulation, match="円弧"):
+        ComplianceProfile(name="x", source=SourceRef(**_SOURCE),
+                          corner_region_method="arc")
+
+
+def test_an_unknown_corner_method_is_a_value_error():
+    with pytest.raises(ValueError, match="corner_region_method"):
+        ComplianceProfile(name="x", source=SourceRef(**_SOURCE),
+                          corner_region_method="street-block")
+
+
+def test_one_road_angle_is_recorded_but_not_applied():
+    """屈曲道路の「一の道路」。報告書は120°超だが行政庁の判断に委ねられる。
+
+    MVCE は辺の併合をしないので、いまは記録用です。値を持てること自体を
+    固定して、あとで実装するときの受け口にします。
+    """
+    p = ComplianceProfile(name="x", source=SourceRef(**_SOURCE),
+                          one_road_angle_deg=120.0)
+    assert p.one_road_angle_deg == 120.0
+    assert any("120度超" in line for line in p.describe_ja())
+
+
+def test_one_road_angle_is_range_checked():
+    with pytest.raises(ValueError, match="one_road_angle_deg"):
+        ComplianceProfile(name="x", source=SourceRef(**_SOURCE),
+                          one_road_angle_deg=0.0)
+
+
+def test_continuous_adjacent_boundary_is_refused():
+    """「連続した一の隣地境界線」方式は未実装（MVCE は敷地区分方式）。"""
+    with pytest.raises(UndeterminedRegulation, match="敷地区分方式"):
+        ComplianceProfile(name="x", source=SourceRef(**_SOURCE),
+                          continuous_adjacent_boundary=True)
+
+
+def test_level_region_split_is_refused():
+    """高低差区分区域そのものが未実装。報告書も法文上の規定が無いと認めている。"""
+    with pytest.raises(UndeterminedRegulation, match="高低差区分区域"):
+        ComplianceProfile(name="x", source=SourceRef(**_SOURCE),
+                          level_region_split_method="perpendicular")
+
+
+def test_the_new_knobs_load_from_yaml(tmp_path):
+    path = _write(tmp_path, """
+        profile:
+          name: ○○市
+          source:
+            document: ○○市天空率取扱い
+            confirmed_on: 2026-08-30
+          corner_region_method: perpendicular
+          one_road_angle_deg: 120
+        """)
+    profile = load_project(path).profile
+    assert profile.corner_region_method == "perpendicular"
+    assert profile.one_road_angle_deg == 120

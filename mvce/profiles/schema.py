@@ -39,6 +39,11 @@ from ..zoning import UndeterminedRegulation
 #: 令2条2項の「平均の高さ」の取り方
 GROUND_AVERAGE_METHODS = ("length_weighted", "simple_mean")
 
+#: 令132条の出隅敷地の区域の切り方（JCBA 報告書 平成22年）
+CORNER_REGION_METHODS = ("perpendicular", "arc")
+#: そのうち実装を持っているもの
+SUPPORTED_CORNER_REGION_METHODS = ("perpendicular",)
+
 #: 実装を持っている天空率の区域分割方式（いまは「分割しない＝止まる」だけ）
 SUPPORTED_SKY_REGION_SPLIT_METHODS: tuple[str, ...] = ()
 
@@ -71,8 +76,45 @@ class ComplianceProfile:
     #: 加重平均（実務の通説）、`simple_mean` は接地位置の単純平均。
     ground_average_method: str = "length_weighted"
 
+    #: 令132条の出隅敷地における「2Aかつ35m」の区域の切り方。
+    #: JCBA 報告書（平成22年）は2つの運用を挙げ「いずれの運用も可能とする」
+    #: としています。
+    #:   `perpendicular` … 広い道路に垂直に区域区分（街区主義。アンケートで
+    #:                      2/3、「基準総則・集団規定の適用事例」も同じ）
+    #:   `arc`           … 敷地の角地を起点に円弧状に区域区分（敷地主義）
+    #: `arc` は未実装で、指定すると `UndeterminedRegulation` で止まります。
+    corner_region_method: str = "perpendicular"
+
+    #: 屈曲道路を「一の道路」とみなす屈曲角度のしきい値（度）。
+    #: JCBA 報告書（平成22年）は「敷地側からみて屈曲角度が120°を超える道路が
+    #: 連担する範囲を一の道路として取り扱う。屈曲角度は道路中心線の屈曲角度」
+    #: としつつ、「特定行政庁の判断に委ねられる」としています。
+    #: アンケートでは約6割が角度基準を使っていません。
+    #: `None` は角度で判断しない（＝入力された辺をそのまま前面道路とする）。
+    #:
+    #: **MVCE はまだ辺の併合をしません。** 一の道路として扱いたい辺は、
+    #: 利用者が1つの `Boundary` にまとめて入力してください。この値は
+    #: いまのところ記録用です。
+    one_road_angle_deg: Optional[float] = None
+
+    #: 隣地境界線を「連続した一の隣地境界線」として敷地を区分せずに扱うか。
+    #: JCBA 報告書（平成22年）が挙げる運用で、「特定行政庁の判断に委ねられる」
+    #: ものです。MVCE は辺ごとに算定位置を作る「敷地区分方式」で、
+    #: `True` は未実装です。
+    continuous_adjacent_boundary: bool = False
+
+    #: 高低差区分区域（令135条の7第3項等）の切り方。JCBA 報告書（平成22年）は
+    #: 隣地斜線を「敷地境界線に直交する線」、北側斜線を「南北方向に平行する線」
+    #: としつつ、法文上の明確な規定がないことを認めています。
+    #: MVCE は高低差区分区域そのものが未実装なので、`None` 以外は
+    #: `UndeterminedRegulation` で止まります。
+    level_region_split_method: Optional[str] = None
+
     #: 天空率の区域分割方式（令135条の6第3項・令135条の9第3項）。
-    #: 方式を定めた文書を持っていないので、`None` 以外は受け付けません。
+    #: 区域の切り方そのものは `regulations/road_regions.py` が条文どおりに
+    #: 実装しました（2026-08-30）。このフィールドは、それと違う方式を
+    #: 名指しで指定したいとき用の受け口です。実装を持っている方式が無いので
+    #: `None` 以外は受け付けません。
     sky_region_split_method: Optional[str] = None
 
     # --- 精度（法規ではなく計算の細かさ）----------------------------
@@ -103,6 +145,34 @@ class ComplianceProfile:
         if (self.sky_measurement_interval_m is not None
                 and self.sky_measurement_interval_m <= 0):
             raise ValueError("sky_measurement_interval_m は正の値にしてください")
+        if self.corner_region_method not in CORNER_REGION_METHODS:
+            raise ValueError(
+                f"corner_region_method は {CORNER_REGION_METHODS} のいずれかです"
+                f"（指定値: {self.corner_region_method!r}）"
+            )
+        if self.corner_region_method not in SUPPORTED_CORNER_REGION_METHODS:
+            raise UndeterminedRegulation(
+                f"出隅敷地の区域の切り方 {self.corner_region_method!r} は"
+                "実装していません。JCBA 報告書（平成22年）は「広い道路に垂直」と"
+                "「敷地の角地を起点に円弧状」の2つを挙げ、いずれも可としていますが、"
+                "MVCE が実装しているのは垂直（街区主義）のほうだけです。"
+            )
+        if self.one_road_angle_deg is not None and not 0 < self.one_road_angle_deg < 360:
+            raise ValueError("one_road_angle_deg は0より大きく360未満にしてください")
+        if self.continuous_adjacent_boundary:
+            raise UndeterminedRegulation(
+                "「連続した一の隣地境界線」として敷地を区分しない運用は"
+                "実装していません。MVCE は辺ごとに算定位置を作る"
+                "「敷地区分方式」です（JCBA 報告書 平成22年 3.一の隣地境界線）。"
+            )
+        if self.level_region_split_method is not None:
+            raise UndeterminedRegulation(
+                f"高低差区分区域の切り方 {self.level_region_split_method!r} を"
+                "指定されましたが、MVCE は高低差区分区域そのものを実装して"
+                "いません（令135条の7第3項等）。JCBA 報告書（平成22年）も"
+                "「建築物から敷地境界線まで間の区分の方法については法文上の"
+                "明確な規定がない」と認めています。"
+            )
         if self.sky_region_split_method is not None:
             raise UndeterminedRegulation(
                 f"天空率の区域分割方式 {self.sky_region_split_method!r} は"
@@ -150,6 +220,16 @@ class ComplianceProfile:
             + ("接地線に沿った長さ加重平均" if self.ground_weighted
                else "接地位置の単純平均")
         )
+        lines.append(
+            "  令132条の出隅の区域: "
+            + ("広い道路に垂直（街区主義）" if self.corner_region_method == "perpendicular"
+               else self.corner_region_method)
+        )
+        if self.one_road_angle_deg is not None:
+            lines.append(
+                f"  一の道路とみなす屈曲角度: {self.one_road_angle_deg:.0f}度超"
+                "（記録のみ。辺の併合は利用者が入力で行う）"
+            )
         lines.extend(f"  {n}" for n in self.notes)
         return lines
 

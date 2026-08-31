@@ -214,6 +214,19 @@ def test_north_slant_exclusion_matches(zone):
     assert (len(py_north) == 0) is (zone in ("1mid", "2mid"))
 
 
+@pytest.mark.parametrize("zone,far", [
+    ("commercial", 6.0), ("neighbor_commercial", 4.0), ("1res", 4.0), ("1mid", 4.0),
+])
+def test_adjacent_setback_exclusion_matches(zone, far):
+    """法56条1項2号の本文の括弧書き。ロの指定区域だけ後退距離が効かない。"""
+    specs = [{"kind": "road", "road_width_m": 6.0, "wall_setback_m": 3.0}]
+    specs += [{"kind": "adjacent", "wall_setback_m": 3.0}] * 3
+    site = Site.from_rings(
+        SQUARE, specs,
+        ZoningParams(zone, far, 0.8, adjacent_slant_2_5_designated=True))
+    _height_parity(site, [(15, 10), (2, 10), (28, 10), (15, 18)])
+
+
 def test_height_limits_match_with_three_roads():
     """令132条の区域区分（3本以上）が JS 版と一致する。
 

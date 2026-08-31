@@ -539,6 +539,24 @@
     return out;
   }
 
+  /* 法56条1項2号の本文の括弧書き:
+   *   「イからニまでに定める数値が二・五とされている建築物（**ロ及びハに
+   *   掲げる建築物で、特定行政庁が…指定する区域内にあるものを除く。**）で
+   *   高さが三十一メートルを超える部分を有するものにあつては、（略）
+   *   水平距離のうち最小のものに相当する距離を加えたもの」
+   *
+   * ロ・ハの指定区域では**後退距離を加算しない**（＝厳しい側）。指定は
+   * イのただし書と同じものとみて adjacentSlant25Designated で受ける。
+   * 「以下この号において同じ」を末尾の立上りにまで及ぼすと立上り無しに
+   * なって成り立たないので、効くのは加算だけと読む（Python版 zoning.py の
+   * adjacent_slant_setback_applies に理由を書いた）。
+   */
+  function adjacentSetbackAddition(site, edge) {
+    if (!site.zoning.adjacentSlant25Designated) return edge.wallSetbackM;
+    // ハ（高層住居誘導地区）は用途地域ではないので扱っていない。効くのはロだけ。
+    return adjacentSlantItem(site.zoning.zoneType) === 'ro' ? 0 : edge.wallSetbackM;
+  }
+
   function adjacentHeightLimit(site, point) {
     const params = adjacentSlantParams(site.zoning.zoneType, site.zoning.farRatio,
       site.zoning.unspecifiedAdjacentSlantSlope, site.zoning.adjacentSlant25Designated);
@@ -547,7 +565,8 @@
     let limit = Infinity;
     for (const edge of site.edges) {
       if (edge.kind !== 'adjacent') continue;
-      const L = pointLineDistance(point, edge.p1, edge.p2) + edge.wallSetbackM
+      const L = pointLineDistance(point, edge.p1, edge.p2)
+              + adjacentSetbackAddition(site, edge)
               + relaxWidth(edge, adjacentRelaxKinds(site), true);
       const h = start + slope * L + levelRelax(edge);
       if (h < limit) limit = h;
@@ -647,7 +666,8 @@
       site.zoning.unspecifiedAdjacentSlantSlope, site.zoning.adjacentSlant25Designated);
     if (!params || edge.kind !== 'adjacent' || heightM <= 0) return 0;
     const [start, slope] = params;
-    const base = edge.wallSetbackM + relaxWidth(edge, adjacentRelaxKinds(site), true);
+    const base = adjacentSetbackAddition(site, edge)
+      + relaxWidth(edge, adjacentRelaxKinds(site), true);
     const level = levelRelax(edge);
     const h0 = start + slope * base + level;
     if (heightM <= h0) return 0;

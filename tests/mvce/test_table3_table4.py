@@ -592,3 +592,103 @@ def test_the_optimizer_warns_when_the_designation_is_missing():
         square, specs,
         ZoningParams("1low", 0.8, 0.5, absolute_height_limit_m=10.0))
     assert not any("法56条1項3号" in n for n in optimize(low, spec, options).notes)
+
+
+# === 法56条1項2号の本文の括弧書き ====================================
+#
+#   二　（略）イからニまでに定める数値が二・五とされている建築物（**ロ及び
+#   ハに掲げる建築物で、特定行政庁が都道府県都市計画審議会の議を経て指定する
+#   区域内にあるものを除く。**以下この号及び第七項第二号において同じ。）で
+#   高さが三十一メートルを超える部分を有するものにあつては、それぞれその
+#   部分から隣地境界線までの水平距離のうち最小のものに相当する距離を
+#   **加えたもの**に、（略）
+#
+# ロ・ハの指定区域では後退距離の加算をしません。指定はイのただし書と同じ
+# ものとみて adjacent_slant_2_5_designated で受けています。
+
+def test_setback_addition_is_the_default():
+    from mvce.zoning import adjacent_slant_setback_applies
+
+    for zone in ("1res", "1mid", "commercial", "neighbor_commercial", "unspecified"):
+        assert adjacent_slant_setback_applies(zone) is True
+
+
+@pytest.mark.parametrize("zone", [
+    "neighbor_commercial", "quasi_industrial", "commercial",
+    "industrial", "industrial_exclusive",
+])
+def test_designated_removes_the_setback_addition_in_item_ro(zone):
+    """ロの地域（近隣商業・準工業・商業・工業・工業専用）。"""
+    from mvce.zoning import adjacent_slant_setback_applies
+
+    assert adjacent_slant_setback_applies(zone, designated_2_5=True) is False
+
+
+@pytest.mark.parametrize("zone", ["1mid", "2mid", "1res", "2res", "quasi_res"])
+def test_item_i_keeps_the_setback_addition(zone):
+    """イの地域は括弧書きの対象外。ただし書で 2.5 になるだけ。"""
+    from mvce.zoning import adjacent_slant_setback_applies
+
+    assert adjacent_slant_setback_applies(zone, designated_2_5=True) is True
+
+
+def test_unspecified_keeps_the_setback_addition():
+    """ニ（無指定区域）も括弧書きの対象外（列挙はロ・ハのみ）。"""
+    from mvce.zoning import adjacent_slant_setback_applies
+
+    assert adjacent_slant_setback_applies("unspecified", designated_2_5=True) is True
+
+
+def _setback_site(zone, far, designated, setback=3.0):
+    square = [(0.0, 0.0), (30.0, 0.0), (30.0, 20.0), (0.0, 20.0)]
+    specs = [{"kind": "road", "road_width_m": 6.0, "wall_setback_m": setback}]
+    specs += [{"kind": "adjacent", "wall_setback_m": setback}] * 3
+    return Site.from_rings(
+        square, specs,
+        ZoningParams(zone, far, 0.8, adjacent_slant_2_5_designated=designated))
+
+
+def test_the_designation_makes_a_commercial_site_stricter():
+    """ロの指定区域では後退距離が効かなくなるので、制限が下がる。"""
+    from mvce.regulations import adjacent_slant
+
+    point = (15.0, 10.0)
+    plain = adjacent_slant.height_limit_at(_setback_site("commercial", 6.0, False), point)
+    designated = adjacent_slant.height_limit_at(
+        _setback_site("commercial", 6.0, True), point)
+    assert designated < plain
+    # 勾配2.5・後退3m ぶんちょうど下がる
+    assert plain - designated == pytest.approx(2.5 * 3.0)
+
+
+def test_the_designation_makes_a_residential_site_more_generous():
+    """イの地域では逆に、ただし書で 1.25 → 2.5 になって緩む。"""
+    from mvce.regulations import adjacent_slant
+
+    point = (15.0, 10.0)
+    plain = adjacent_slant.height_limit_at(_setback_site("1res", 4.0, False), point)
+    designated = adjacent_slant.height_limit_at(_setback_site("1res", 4.0, True), point)
+    assert designated > plain
+
+
+def test_the_rise_height_is_not_removed_by_the_parenthetical():
+    """「以下この号において同じ」を末尾にまで及ぼさない。
+
+    文字どおり及ぼすと、ロの指定区域の建築物は立上りが 20m でも 31m でも
+    なくなり、隣地境界線上で高さ0になります。明らかに法の趣旨に反するので、
+    括弧書きが効くのは後退距離の加算だけと読んでいます。
+    """
+    from mvce.regulations import adjacent_slant
+
+    # 後退0なら加算の有無で差が出ないので、立上り31mがそのまま残るはず
+    site = _setback_site("commercial", 6.0, True, setback=0.0)
+    on_boundary = adjacent_slant.edge_height_limit(site, 1, (30.0, 10.0))
+    assert on_boundary == pytest.approx(31.0)
+
+
+def test_the_sky_ratio_baseline_is_not_removed_either():
+    """法56条7項2号の基準線（12.4m）も残る。同じ理由。"""
+    from mvce.regulations.sky_positions import adjacent_baseline_distance_m
+
+    site = _setback_site("commercial", 6.0, True)
+    assert adjacent_baseline_distance_m(site) == pytest.approx(12.4)

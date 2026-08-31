@@ -24,7 +24,11 @@ import math
 
 from ..geometry import Point, point_line_distance
 from ..site import Boundary, RelaxationKind, Site
-from ..zoning import adjacent_slant_item, adjacent_slant_params
+from ..zoning import (
+    adjacent_slant_item,
+    adjacent_slant_params,
+    adjacent_slant_setback_applies,
+)
 
 # 令135条の3第1項1号の緩和対象: 公園・広場・水面・線路敷
 # 令135条の3第1項第1号が列挙するのは
@@ -70,6 +74,23 @@ def applies(site: Site) -> bool:
     return adjacent_slant_item(site.zoning.zone_type) is not None
 
 
+def _setback_addition(site: Site, edge) -> float:
+    """後退距離の加算（法56条1項2号の本文）。
+
+    号の本文の括弧書きにより、**ロ・ハの地域で特定行政庁が指定する区域内の
+    建築物には加算しません**。指定はイのただし書と同じものとみて
+    `adjacent_slant_2_5_designated` で受けています（`zoning.py` の
+    `adjacent_slant_setback_applies()` に読み方を書きました）。
+
+    加算しないほうが**厳しい側**です。既定（指定なし）は加算するので、
+    2026-08-30 以前と同じ挙動です。
+    """
+    if adjacent_slant_setback_applies(
+            site.zoning.zone_type, site.zoning.adjacent_slant_2_5_designated):
+        return edge.wall_setback_m
+    return 0.0
+
+
 def edge_height_limit(site: Site, edge_index: int, point: Point) -> float:
     edge = site.edges[edge_index]
     params = adjacent_slant_params(
@@ -82,7 +103,7 @@ def edge_height_limit(site: Site, edge_index: int, point: Point) -> float:
         return math.inf
     start_height, slope = params
     L = (point_line_distance(point, edge.p1, edge.p2)
-         + edge.wall_setback_m + _relaxation_extra(edge, site))
+         + _setback_addition(site, edge) + _relaxation_extra(edge, site))
     return start_height + slope * L + _level_relaxation(edge)
 
 
@@ -109,7 +130,7 @@ def required_setback_for_height(site: Site, edge_index: int, height_m: float) ->
     if params is None or edge.kind.value != "adjacent" or height_m <= 0:
         return 0.0
     start_height, slope = params
-    base = edge.wall_setback_m + _relaxation_extra(edge, site)
+    base = _setback_addition(site, edge) + _relaxation_extra(edge, site)
     h0 = start_height + slope * base + _level_relaxation(edge)
     if height_m <= h0:
         return 0.0
