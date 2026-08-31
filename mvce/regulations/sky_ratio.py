@@ -42,8 +42,9 @@ from shapely.ops import nearest_points, unary_union
 from ..geometry import Point, offset_polygon_by_edge_distances
 from ..massing import Block
 from ..site import Site
-from ..zoning import UndeterminedRegulation, road_slant_tier
+from ..zoning import UndeterminedRegulation
 from . import adjacent_slant, north_slant, road_slant
+from .road_regions import RoadRegion, applicable_distance_band, sky_regions
 from .sky_positions import MeasurementPosition, all_positions
 
 RAY_LENGTH = 1.0e5
@@ -60,6 +61,8 @@ class SkyRatioCheck:
     z_m: float         # 想定半球の中心の高さ（令135条の9〜11）
     ps: float
     pr: float
+    #: 令132条の区域の番号（道路で前面道路が2以上のときだけ）
+    region_index: int | None = None
 
     @property
     def ok(self) -> bool:
@@ -123,7 +126,8 @@ def sky_ratio_percent(point3: tuple[float, float, float], blocks: list[Block],
 
 
 def measurement_points(
-    site: Site, max_interval_m: float | None = None
+    site: Site, max_interval_m: float | None = None,
+    regions: list[RoadRegion] | None = None,
 ) -> list[MeasurementPosition]:
     """算定位置（令135条の9・10・11）。詳細は `sky_positions.py`。
 
@@ -133,8 +137,13 @@ def measurement_points(
 
     `max_interval_m` は条文の間隔をさらに細かくしたいときだけ使います
     （粗くはできません）。
+
+    前面道路が2以上ある敷地では、道路の位置は令132条の**区域ごと**です
+    （令135条の9第3項）。`regions` を省略すると区域を作り直します。
     """
-    return all_positions(site, max_interval_m)
+    if regions is None:
+        regions = road_sky_regions(site)
+    return all_positions(site, max_interval_m, regions)
 
 
 # === 適合建築物（令135条の6・7・8）====================================
@@ -155,13 +164,27 @@ DEFAULT_REFERENCE_LAYERS = 20
 _SEARCH_CEILING_M = 400.0
 
 
-def _required_setback(site: Site, edge_index: int, height_m: float, kind: str) -> float:
-    """規制 `kind` **だけ**で見た、その辺に必要な後退距離。"""
+def _required_setback(site: Site, edge_index: int, height_m: float, kind: str,
+                      region: RoadRegion | None = None) -> float:
+    """規制 `kind` **だけ**で見た、その辺に必要な後退距離。
+
+    `region` を渡すと令132条の区域として扱います。その区域の前面道路でない
+    辺は制限を与えません（2項「これらの前面道路のみを前面道路とし」・
+    3項「その接する前面道路のみを前面道路とする」）。区域の前面道路には
+    みなし幅員を使います。
+    """
     edge = site.edges[edge_index]
     if kind == "road":
+        if not edge.is_road:
+            return 0.0
+        width_m = None
+        if region is not None:
+            if edge_index not in region.road_indices:
+                return 0.0
+            width_m = region.deemed_width_m
         # 適用距離で頭打ちにしない素の距離。帯の中で斜線どおりの形を作るため
-        return road_slant.slant_distance_for_height(site, edge_index, height_m) \
-            if edge.is_road else 0.0
+        return road_slant.slant_distance_for_height(site, edge_index, height_m,
+                                                    width_m=width_m)
     if kind == "adjacent":
         return adjacent_slant.required_setback_for_height(site, edge_index, height_m) \
             if edge.kind.value == "adjacent" else 0.0
@@ -171,7 +194,8 @@ def _required_setback(site: Site, edge_index: int, height_m: float, kind: str) -
     raise ValueError(f"kind は {REFERENCE_KINDS} のいずれかです: {kind!r}")
 
 
-def applicable_region(site: Site, kind: str) -> BaseGeometry | None:
+def applicable_region(site: Site, kind: str,
+                      region: RoadRegion | None = None) -> BaseGeometry | None:
     """規制 `kind` が適用される範囲（令135条の6・7・8 の「…に限る」）。
 
     - 道路 … 別表第三（は）欄の適用距離までの帯（前面道路ごとの和集合）
@@ -180,9 +204,11 @@ def applicable_region(site: Site, kind: str) -> BaseGeometry | None:
     条文は**適合建築物も計画建築物も**この範囲内の部分に限ると言っています。
     範囲が空なら両方とも空になり、天空率は 100% 対 100% で自動的に適合します
     （道路高さ制限がそもそも敷地に届いていないのだから、当然の結果です）。
+
+    `region` は令132条の区域です（令135条の6第3項）。道路のときだけ効きます。
     """
     if kind == "road":
-        return _road_applicable_region(site)
+        return _road_applicable_region(site, region)
     if kind == "adjacent":
         return Polygon(site.points) if adjacent_slant.applies(site) else None
     if kind == "north":
@@ -206,7 +232,17 @@ def clip_blocks(blocks: list[Block], region: BaseGeometry | None) -> list[Block]
     return clipped
 
 
-def _road_applicable_region(site: Site) -> BaseGeometry | None:
+def road_sky_regions(site: Site) -> list[RoadRegion]:
+    """道路の天空率を評価する単位（令132条の区域）。前面道路が1本以下なら空。
+
+    実体は `road_regions.sky_regions()` です。令134条2項を選んだ敷地は
+    そちらで `UndeterminedRegulation` になります。
+    """
+    return sky_regions(site)
+
+
+def _road_applicable_region(site: Site,
+                            region: RoadRegion | None = None) -> BaseGeometry | None:
     """道路高さ制限が適用される範囲（令135条の6第1項1号の「範囲内の部分」）。
 
     別表第三（は）欄の適用距離までの帯です。ここを外すと道路高さ制限が
@@ -216,75 +252,73 @@ def _road_applicable_region(site: Site) -> BaseGeometry | None:
     「制限なし＝どこまでも高い」形になり、Pr が極端に小さく出て**何でも
     通ってしまいます**。切り落としは省略できません。
 
-    **前面道路が2以上ある敷地では `UndeterminedRegulation` で止まります。**
-    令135条の6第3項・令135条の9第3項が、その場合は令132条・令134条2項の
-    **区域ごと**に適合建築物・算定位置・計画建築物を切り分けて比較しろと
-    定めているためです。MVCE は区域分割ができないので、勝手に近似すると
-    どちら向きにずれるか言えません（原則H）。
+    `region` を渡すと、その区域の前面道路だけを、みなし幅員で見た帯の
+    和集合を取り、さらに区域そのもので切ります（令135条の6第3項）。
     """
     roads = [i for i, e in enumerate(site.edges) if e.is_road]
-    if len(roads) >= 2:
-        raise UndeterminedRegulation(
-            f"前面道路が{len(roads)}本あります。令135条の6第3項・令135条の9第3項は、"
-            "前面道路が2以上ある場合に令132条・令134条2項の区域ごとに"
-            "適合建築物・算定位置・計画建築物を切り分けて比較することを"
-            "求めています。MVCE は区域分割に対応していないため、天空率による"
-            "道路高さ制限の適用除外（法56条7項1号）は判定できません。"
-            "斜線制限のまま（use_sky_ratio: false）で計算してください。"
-        )
     if not roads:
         return None
+    if region is None and len(roads) >= 2:
+        raise UndeterminedRegulation(
+            f"前面道路が{len(roads)}本あります。令135条の6第3項は区域ごとの"
+            "比較を求めているので、区域を指定せずに道路の適用範囲は決まりません。"
+            "`road_sky_regions(site)` の区域を渡してください。"
+        )
 
-    i = roads[0]
-    edge = site.edges[i]
-    tier = road_slant_tier(site.zoning.zone_type, site.zoning.far_ratio,
-                           site.zoning.unspecified_road_slant_slope)
-    base = (edge.road_width_m + edge.wall_setback_m
-            + road_slant._relaxation_extra(edge))
-    depth = tier.applicable_distance_m - base
-    if depth <= 0:
+    if region is None:
+        bands = [applicable_distance_band(site, roads[0])]
+    else:
+        bands = [applicable_distance_band(site, i, region.deemed_width_m)
+                 for i in region.road_indices]
+    bands = [b for b in bands if b is not None]
+    if not bands:
         return None          # 適用距離が敷地に届いていない
-    inner = offset_polygon_by_edge_distances(
-        site.points, [depth if j == i else 0.0 for j in range(len(site.edges))])
-    site_poly = Polygon(site.points)
-    band = site_poly if inner is None else site_poly.difference(inner)
-    return None if band.is_empty else band
+    band: BaseGeometry = unary_union(bands)
+    if region is not None:
+        band = band.intersection(region.polygon)
+    if band.is_empty or band.area <= 1e-9:
+        return None
+    return band
 
 
-def reference_ring_at_height(site: Site, height_m: float, kind: str) -> BaseGeometry | None:
+def reference_ring_at_height(site: Site, height_m: float, kind: str,
+                             region: RoadRegion | None = None) -> BaseGeometry | None:
     """高さ `height_m` において規制 `kind` に適合する平面領域。"""
     distances = [
-        _required_setback(site, i, height_m, kind) for i in range(len(site.edges))
+        _required_setback(site, i, height_m, kind, region)
+        for i in range(len(site.edges))
     ]
-    region = offset_polygon_by_edge_distances(site.points, distances)
-    if region is None:
+    ring = offset_polygon_by_edge_distances(site.points, distances)
+    if ring is None:
         return None
-    applicable = applicable_region(site, kind)
+    applicable = applicable_region(site, kind, region)
     if applicable is None:
         return None
-    region = region.intersection(applicable)
-    if region.is_empty or region.area <= 1e-9:
+    ring = ring.intersection(applicable)
+    if ring.is_empty or ring.area <= 1e-9:
         return None
-    return region
+    return ring
 
 
-def _reference_top_m(site: Site, kind: str) -> float:
+def _reference_top_m(site: Site, kind: str,
+                     region: RoadRegion | None = None) -> float:
     """その規制の適合建築物の頂部の高さ。
 
     「その高さで領域が残る最大の高さ」を二分探索します。各規制の制限は
     敷地の広がりで頭打ちになるので必ず有限です（隣地・北側は敷地内で最も
     遠い点、道路は適用距離で決まる）。
     """
-    if reference_ring_at_height(site, 0.0, kind) is None:
+    if reference_ring_at_height(site, 0.0, kind, region) is None:
         return 0.0
     lo, hi = 0.0, 1.0
-    while hi < _SEARCH_CEILING_M and reference_ring_at_height(site, hi, kind) is not None:
+    while hi < _SEARCH_CEILING_M \
+            and reference_ring_at_height(site, hi, kind, region) is not None:
         lo, hi = hi, hi * 2.0
     if hi >= _SEARCH_CEILING_M:
         return _SEARCH_CEILING_M
     for _ in range(40):
         mid = (lo + hi) / 2.0
-        if reference_ring_at_height(site, mid, kind) is not None:
+        if reference_ring_at_height(site, mid, kind, region) is not None:
             lo = mid
         else:
             hi = mid
@@ -292,7 +326,8 @@ def _reference_top_m(site: Site, kind: str) -> float:
 
 
 def reference_building(site: Site, kind: str,
-                       n_layers: int = DEFAULT_REFERENCE_LAYERS) -> list[Block]:
+                       n_layers: int = DEFAULT_REFERENCE_LAYERS,
+                       region: RoadRegion | None = None) -> list[Block]:
     """規制 `kind` の適合建築物を階段状に近似する。
 
     **各層は「層の上端」の断面で作ります。** 斜線は上へ行くほど狭くなるので、
@@ -309,7 +344,7 @@ def reference_building(site: Site, kind: str,
     """
     if kind not in REFERENCE_KINDS:
         raise ValueError(f"kind は {REFERENCE_KINDS} のいずれかです: {kind!r}")
-    top = _reference_top_m(site, kind)
+    top = _reference_top_m(site, kind, region)
     if top <= 0 or n_layers <= 0:
         return []
 
@@ -317,9 +352,9 @@ def reference_building(site: Site, kind: str,
     previous = 0.0
     for k in range(n_layers):
         z_top = top * (k + 1) / n_layers
-        region = reference_ring_at_height(site, z_top, kind)
-        if region is not None:
-            for poly in _polygons(region):
+        ring = reference_ring_at_height(site, z_top, kind, region)
+        if ring is not None:
+            for poly in _polygons(ring):
                 if poly.area > 1e-6:
                     blocks.append(Block(footprint=poly, z_bottom=previous, z_top=z_top))
         previous = z_top
@@ -352,10 +387,49 @@ def slant_envelope(site: Site, n_layers: int = DEFAULT_REFERENCE_LAYERS) -> list
     return blocks
 
 
-def reference_buildings(site: Site,
-                        n_layers: int = DEFAULT_REFERENCE_LAYERS) -> dict[str, list[Block]]:
-    """道路・隣地・北側それぞれの適合建築物。"""
-    return {kind: reference_building(site, kind, n_layers) for kind in REFERENCE_KINDS}
+def reference_buildings(
+    site: Site, n_layers: int = DEFAULT_REFERENCE_LAYERS,
+    regions: list[RoadRegion] | None = None,
+) -> dict[str, list[Block]]:
+    """測定点のグループごとの適合建築物。
+
+    キーは `MeasurementPosition.group_key` と同じで、隣地・北側は
+    `"adjacent"` / `"north"`、道路は前面道路が1本以下なら `"road"`、
+    2以上なら令132条の区域ごとに `"road#0"`, `"road#1"`, … です
+    （令135条の6第3項）。
+    """
+    if regions is None:
+        regions = road_sky_regions(site)
+    out: dict[str, list[Block]] = {}
+    if regions:
+        for k, region in enumerate(regions):
+            out[f"road#{k}"] = reference_building(site, "road", n_layers, region)
+    else:
+        out["road"] = reference_building(site, "road", n_layers)
+    for kind in ("adjacent", "north"):
+        out[kind] = reference_building(site, kind, n_layers)
+    return out
+
+
+def applicable_regions(
+    site: Site, regions: list[RoadRegion] | None = None,
+) -> dict[str, BaseGeometry | None]:
+    """`reference_buildings()` と同じキーでの適用範囲。
+
+    計画建築物を切るのに使います（令135条の6第1項1号の「…が適用される
+    範囲内の部分に限る」、第3項で「区域ごとの部分」）。
+    """
+    if regions is None:
+        regions = road_sky_regions(site)
+    out: dict[str, BaseGeometry | None] = {}
+    if regions:
+        for k, region in enumerate(regions):
+            out[f"road#{k}"] = applicable_region(site, "road", region)
+    else:
+        out["road"] = applicable_region(site, "road")
+    for kind in ("adjacent", "north"):
+        out[kind] = applicable_region(site, kind)
+    return out
 
 
 def _polygons(geometry: BaseGeometry):
@@ -379,26 +453,35 @@ def check(site: Site, proposed: list[Block],
 
     想定半球の中心の高さは位置ごとに違います（道路は路面の中心、隣地・
     北側は敷地の地盤面。いずれも令135条の9〜11 の高低差みなしを含む）。
+
+    **前面道路が2以上ある敷地では、道路は令132条の区域ごとに比べます**
+    （令135条の6第3項・令135条の9第3項）。区域ごとに、その区域の前面道路を
+    みなし幅員で見た適合建築物・算定位置・計画建築物の3つを揃えます。
+    `references` を自前で渡すときは `reference_buildings()` と同じキー
+    （`"road#0"` など）にしてください。
     """
+    regions = road_sky_regions(site)
     if references is None:
-        references = reference_buildings(site)
+        references = reference_buildings(site, regions=regions)
     # 計画建築物も規制ごとの適用範囲で切る（令135条の6第1項1号の
     # 「…が適用される範囲内の部分に限る」）。切らずに丸ごと比べると、
     # 適合建築物の側だけが切られていて比較になりません。
     clipped = {
-        kind: clip_blocks(proposed, applicable_region(site, kind))
-        for kind in REFERENCE_KINDS
+        key: clip_blocks(proposed, geometry)
+        for key, geometry in applicable_regions(site, regions).items()
     }
     results = []
-    for position in measurement_points(site, max_interval_m):
+    for position in measurement_points(site, max_interval_m, regions):
         p3 = position.point3
+        key = position.group_key
         results.append(SkyRatioCheck(
             point=position.point, kind=position.kind,
             edge_index=position.edge_index, z_m=position.z_m,
-            ps=sky_ratio_percent(p3, clipped[position.kind], n_azimuth,
+            ps=sky_ratio_percent(p3, clipped.get(key, []), n_azimuth,
                                  azimuth_offset_ratio),
-            pr=sky_ratio_percent(p3, references.get(position.kind, []), n_azimuth,
+            pr=sky_ratio_percent(p3, references.get(key, []), n_azimuth,
                                  azimuth_offset_ratio),
+            region_index=position.region_index,
         ))
     return results
 

@@ -56,8 +56,9 @@ from ..mesh import BuildableArea
 from ..regulations.sky_ratio import (
     azimuths_deg,
     measurement_points,
-    applicable_region,
+    applicable_regions,
     reference_buildings,
+    road_sky_regions,
     sky_ratio_percent,
 )
 from .shadow_index import _ray_entry_distances
@@ -85,6 +86,9 @@ class SkyIndex:
 
     points: list[Point]
     kinds: list[str]                 # "road" | "adjacent" | "north"
+    #: 測定点ごとの比較相手の識別子。道路で前面道路が2以上なら
+    #: 令132条の区域ごとに `"road#0"`, `"road#1"`, …（令135条の6第3項）
+    group_keys: list[str]
     edge_indices: list[int]
     distances: list[np.ndarray]      # 点ごとの (方位, マス)
     pr: np.ndarray                   # 点ごとの適合建築物の天空率(%)
@@ -193,12 +197,15 @@ def build_sky_index(
         [list(cell.polygon.bounds) for cell in area.cells], dtype=float
     ).reshape(-1, 4)
 
+    regions = road_sky_regions(site)
     if references is None:
-        references = reference_buildings(site, n_layers=reference_layers)
+        references = reference_buildings(site, n_layers=reference_layers,
+                                         regions=regions)
 
-    samples = measurement_points(site, max_interval_m)
+    samples = measurement_points(site, max_interval_m, regions)
     points = [s.point for s in samples]
     kinds = [s.kind for s in samples]
+    group_keys = [s.group_key for s in samples]
     edges = [s.edge_index for s in samples]
     z_m = np.array([s.z_m for s in samples], dtype=float)
 
@@ -211,12 +218,11 @@ def build_sky_index(
     # 距離を inf にすれば仰角0になり、そのマスは天空を塞がない扱いになる。
     # マスが範囲に一部でもかかっていれば含める（多めに見る＝厳しい側）。
     outside: dict[str, np.ndarray] = {}
-    for kind in set(kinds):
-        region = applicable_region(site, kind)
+    for key, region in applicable_regions(site, regions).items():
         if region is None:
-            outside[kind] = np.ones(len(area.cells), dtype=bool)
+            outside[key] = np.ones(len(area.cells), dtype=bool)
         else:
-            outside[kind] = np.array(
+            outside[key] = np.array(
                 [not cell.polygon.intersects(region) for cell in area.cells],
                 dtype=bool)
 
@@ -228,16 +234,17 @@ def build_sky_index(
         if len(area.cells):
             for ai, direction in enumerate(directions):
                 table[ai] = _ray_entry_distances(origin, direction, boxes)
-            table[:, outside[kinds[i]]] = np.inf
+            table[:, outside[group_keys[i]]] = np.inf
         distances.append(table)
         # Pr は形が変わらないので1回だけ。Ps と同じ方位でサンプリングする。
         # 測定点の種別ごとに違う適合建築物と比べる（令135条の6・7・8）
         pr[i] = sky_ratio_percent(
-            (point[0], point[1], float(z_m[i])), references.get(kinds[i], []),
+            (point[0], point[1], float(z_m[i])),
+            references.get(group_keys[i], []),
             n_azimuth, azimuth_offset_ratio)
 
     return SkyIndex(
-        points=points, kinds=kinds, edge_indices=edges,
+        points=points, kinds=kinds, group_keys=group_keys, edge_indices=edges,
         distances=distances, pr=pr, z_m=z_m,
         n_azimuth=n_azimuth, n_cells=len(area.cells),
         azimuth_offset_ratio=azimuth_offset_ratio,

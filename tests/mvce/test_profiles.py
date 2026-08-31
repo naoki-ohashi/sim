@@ -78,11 +78,14 @@ def test_an_unimplemented_split_method_refuses():
 
 
 def test_the_refusal_says_why():
+    """条文どおりの区域分割は実装済み。**方式**を名指しする受け口だけが空。"""
     with pytest.raises(UndeterminedRegulation) as e:
         ComplianceProfile(name="x", source=SourceRef(**_SOURCE),
                           sky_region_split_method="tokyo")
     assert "令135条の6第3項" in str(e.value)
-    assert "取得できていません" in str(e.value)
+    assert "その方式を定めた文書が要ります" in str(e.value)
+    # 条文どおりの区域分割（令132条）はできることを言い添えている
+    assert "road_regions.py" in str(e.value)
 
 
 # === 入力の検証 =======================================================

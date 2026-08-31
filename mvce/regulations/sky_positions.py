@@ -55,10 +55,11 @@
 
 - **令135条の9第5項・令135条の10第5項・令135条の11第5項** … 特定行政庁が
   規則で高さを別に定めている場合。規則を入力する口がないので未対応です
-- **令135条の6第2項・3項、令135条の7第2項・3項、令135条の8第2項・3項** …
-  勾配が異なる地域等ごと／令132条・令134条2項の区域ごと／高低差区分区域
-  ごとの分割。`zone_split` が用途地域のまたがりで止まるのと同じ理由で、
-  MVCE はまだ区域ごとの分割ができません
+- **令135条の6第2項、令135条の7第2項・3項、令135条の8第2項・3項** …
+  勾配が異なる地域等ごと／高低差区分区域ごとの分割。`zone_split` が用途
+  地域のまたがりで止まるのと同じ理由で、MVCE はまだできません。
+  **令135条の6第3項・令135条の9第3項（前面道路が2以上のときの令132条の
+  区域ごと）は 2026-08-31 に実装しました**（令134条2項の区域は除く）
 - **北側の基準線が前面道路のとき** … 法56条7項3号は「隣地境界線から」と
   しか書いていませんが、法56条1項3号は「前面道路の反対側の境界線又は
   隣地境界線」から測ります。北側が前面道路の敷地で7項3号を動かすには
@@ -70,7 +71,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from ..geometry import Point, edge_direction, interior_normal
+from ..geometry import Point, interior_normal
 from ..site import Boundary, Site
 from ..zoning import LOW_RISE_ZONES, MID_RISE_ZONES, adjacent_slant_params
 from . import adjacent_slant, north_slant, road_slant
@@ -102,10 +103,24 @@ class MeasurementPosition:
     z_m: float         # 中心の高さ（敷地の地盤面を0とした値）
     kind: str          # "road" | "adjacent" | "north"
     edge_index: int
+    #: 令132条の区域の番号（前面道路が2以上のときだけ。それ以外は None）
+    region_index: int | None = None
 
     @property
     def point3(self) -> tuple[float, float, float]:
         return (self.point[0], self.point[1], self.z_m)
+
+    @property
+    def group_key(self) -> str:
+        """この位置を比べる相手（適合建築物・適用範囲）の識別子。
+
+        令135条の6第3項・令135条の9第3項により、前面道路が2以上ある敷地では
+        **区域ごと**に適合建築物・算定位置・計画建築物を切り分けて比べます。
+        道路の測定点だけが区域を持ちます。
+        """
+        if self.kind == "road" and self.region_index is not None:
+            return f"road#{self.region_index}"
+        return self.kind
 
 
 def _cap(statutory_m: float, user_m: float | None) -> float:
@@ -164,26 +179,83 @@ def _offset_north(site: Site, edge: Boundary, distance_m: float) -> tuple[Point,
 # === 道路（令135条の9）================================================
 
 def road_positions(site: Site,
-                   max_interval_m: float | None = None) -> list[MeasurementPosition]:
+                   max_interval_m: float | None = None,
+                   regions: list | None = None) -> list[MeasurementPosition]:
     """令135条の9: 前面道路の反対側の境界線上、幅員の1/2以内の間隔。
 
     `max_interval_m` は利用者が**さらに細かく**したいときの上限です。
     条文の値より粗くはできません（`min` を取ります）。細かくするぶんには
     測定点が増えて判定が厳しくなるだけなので安全側です。
+
+    ## 前面道路が2以上あるとき（第3項）
+
+    第3項は1項1号の「敷地（道路高さ制限が適用される範囲内の部分に限る。）」を
+    「…の第百三十二条又は第百三十四条第二項に規定する区域**ごと**」と読み替え
+    ます。つまり**区域ごとに**、その区域が前面道路に面している部分の両端を
+    取り、そこから最も近い反対側の境界線上に位置を置きます。
+
+    区域は `road_regions.sky_regions()` で作ります（`regions` に渡せば
+    作り直しません）。令134条2項を選んだ敷地はそこで止まります。区域が持つ前面道路は令132条2項の「これらの前面
+    道路のみを前面道路とし」・3項の「その接する前面道路のみ」に従うので、
+    区域に入っていない道路にはその区域の位置を作りません。
+
+    ## 間隔に使う幅員は**実幅員**です
+
+    条文は「当該前面道路の幅員の二分の一」としか書いていません。区域内では
+    幅員が読み替えられていますが、みなし幅員（＝実幅員以上）で割ると間隔が
+    **粗く**なり、測定点の間をすり抜ける危険があります。実幅員で割れば
+    間隔は同じか細かくなるので、そちらを採ります（`min` と同じ考え方）。
     """
+    from .road_regions import applicable_distance_band, region_frontage, sky_regions
+
+    if regions is None:
+        regions = sky_regions(site)
+
     positions: list[MeasurementPosition] = []
-    for i, edge in enumerate(site.edges):
-        if not edge.is_road:
-            continue
-        # 1号: 敷地の前面道路に面する部分の両端から最も近い反対側境界線上の位置。
-        # 直線の道路では辺の両端の垂線の足がそれに当たる。
-        a, b = _offset_outward(edge, edge.road_width_m)
-        # 令135条の9第1項: 路面の中心の高さ。第4項の高低差みなしを含む。
-        z = edge.ground_level_diff_m + road_slant._level_relaxation(edge)
-        interval = _cap(edge.road_width_m / 2.0, max_interval_m)
-        for point in _evenly_spaced(a, b, interval):
-            positions.append(MeasurementPosition(point, z, "road", i))
+    if not regions:
+        for i, edge in enumerate(site.edges):
+            if not edge.is_road:
+                continue
+            # 1号: 敷地の前面道路に面する部分の両端から最も近い反対側境界線上の
+            # 位置。直線の道路では辺の両端の垂線の足がそれに当たる。
+            a, b = _offset_outward(edge, edge.road_width_m)
+            positions.extend(_road_positions_between(site, edge, i, a, b,
+                                                     max_interval_m, None))
+        return positions
+
+    for k, region in enumerate(regions):
+        for i in region.road_indices:
+            edge = site.edges[i]
+            band = applicable_distance_band(site, i, region.deemed_width_m)
+            if band is None:
+                # 適用距離がこの区域のみなし幅員に届かない。道路高さ制限が
+                # かかる部分が無いので、算定位置も無い。
+                continue
+            span = region_frontage(site, region, i, within=band)
+            if span is None:
+                continue
+            a, b = (_offset_outward_point(edge, p, edge.road_width_m) for p in span)
+            positions.extend(_road_positions_between(site, edge, i, a, b,
+                                                     max_interval_m, k))
     return positions
+
+
+def _offset_outward_point(edge: Boundary, point: Point, distance_m: float) -> Point:
+    """点を辺の外向き法線方向に `distance_m` ずらす。"""
+    nx, ny = interior_normal(edge.p1, edge.p2)
+    return (point[0] - distance_m * nx, point[1] - distance_m * ny)
+
+
+def _road_positions_between(site: Site, edge: Boundary, edge_index: int,
+                            a: Point, b: Point, max_interval_m: float | None,
+                            region_index: int | None) -> list[MeasurementPosition]:
+    # 令135条の9第1項: 路面の中心の高さ。第4項の高低差みなしを含む。
+    z = edge.ground_level_diff_m + road_slant._level_relaxation(edge)
+    interval = _cap(edge.road_width_m / 2.0, max_interval_m)
+    return [
+        MeasurementPosition(point, z, "road", edge_index, region_index)
+        for point in _evenly_spaced(a, b, interval)
+    ]
 
 
 # === 隣地（令135条の10）===============================================
@@ -280,13 +352,16 @@ def north_positions(site: Site,
 # === まとめ ===========================================================
 
 def all_positions(site: Site,
-                  max_interval_m: float | None = None) -> list[MeasurementPosition]:
+                  max_interval_m: float | None = None,
+                  regions: list | None = None) -> list[MeasurementPosition]:
     """道路・隣地・北側のすべての算定位置。
 
     北側を向いた**前面道路**の辺は、道路（令135条の9）と北側
     （令135条の11）の両方の位置を持ちます。どちらの制限も適用される
     ためで、重複ではありません。
+
+    `regions` は令132条の区域（道路の第3項）です。省略すると作ります。
     """
-    return (road_positions(site, max_interval_m)
+    return (road_positions(site, max_interval_m, regions)
             + adjacent_positions(site, max_interval_m)
             + north_positions(site, max_interval_m))

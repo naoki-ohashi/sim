@@ -29,6 +29,7 @@ from mvce.regulations.sky_ratio import (
     clip_blocks,
     reference_building,
     reference_buildings,
+    road_sky_regions,
 )
 from mvce.site import Site
 from mvce.zoning import UndeterminedRegulation, ZoningParams, road_slant_tier
@@ -108,14 +109,22 @@ def test_road_reference_is_empty_when_the_applicable_distance_does_not_reach():
     assert reference_building(site, "road") == []
 
 
-def test_two_roads_are_refused():
-    """令135条の6第3項・令135条の9第3項は区域ごとの比較を求めている。"""
+def test_two_roads_need_a_region():
+    """令135条の6第3項・令135条の9第3項は**区域ごと**の比較を求めている。
+
+    区域を渡さずに道路の適合建築物を求めるのは、その要求を無視することに
+    なるので止めます（区域ありの計算は `test_sky_road_regions.py`）。
+    """
     specs = [{"kind": "road", "road_width_m": 6.0},
              {"kind": "road", "road_width_m": 8.0},
              {"kind": "adjacent"}, {"kind": "adjacent"}]
     site = _site(specs=specs, far=4.0)
     with pytest.raises(UndeterminedRegulation, match="令135条の6第3項"):
         reference_building(site, "road")
+    # 区域を渡せば計算できる
+    regions = road_sky_regions(site)
+    assert regions
+    assert reference_building(site, "road", region=regions[0])
 
 
 def test_no_road_means_no_road_reference():

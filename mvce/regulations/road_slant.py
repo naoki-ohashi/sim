@@ -318,7 +318,8 @@ def opposite_boundary_lines(site: Site) -> list[tuple[int, tuple[Point, Point]]]
     ]
 
 
-def slant_distance_for_height(site: Site, edge_index: int, height_m: float) -> float:
+def slant_distance_for_height(site: Site, edge_index: int, height_m: float,
+                              width_m: float | None = None) -> float:
     """高さ `height_m` に必要な、道路境界線からの後退距離（**適用距離で
     頭打ちにしない**素の値）。
 
@@ -328,13 +329,18 @@ def slant_distance_for_height(site: Site, edge_index: int, height_m: float) -> f
     「道路高さ制限が適用される範囲内の部分に限る」（令135条の6第1項1号）
     ので、適用距離までの帯の中で斜線どおりの形を作る必要があり、
     頭打ちにすると帯の中に何も残らなくなります。
+
+    `width_m` は令132条のみなし幅員を渡すためのものです。省略すると実幅員を
+    使います。緩和（後退・公園等・高低差）は幅員を差し替えてもそのまま
+    効きます。令132条が読み替えるのは**幅員だけ**だからです。
     """
     edge = site.edges[edge_index]
     if not edge.is_road or height_m <= 0:
         return 0.0
     tier = road_slant_tier(site.zoning.zone_type, site.zoning.far_ratio,
                            site.zoning.unspecified_road_slant_slope)
-    base = edge.road_width_m + edge.wall_setback_m + _relaxation_extra(edge)
+    width = edge.road_width_m if width_m is None else width_m
+    base = width + edge.wall_setback_m + _relaxation_extra(edge)
     level = _level_relaxation(edge)
     if height_m <= tier.slope * base + level:
         return 0.0

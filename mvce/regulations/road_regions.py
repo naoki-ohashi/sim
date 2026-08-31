@@ -52,28 +52,33 @@
 2. 2項 … 1項の外で B(2B=12m) と C(2C=9m) の両方の届く範囲。みなし幅員 6m
 3. 3項 … 残り（C だけが届く）。幅員 4.5m
 
-## この実装が抱えている未決点
+## 図1-6-1 の「2C」について（決着済み・2026-08-31）
 
 新JCBA方式の解説の図 1-6-1（4方道路）は、狭い道路 C が B・D の区域に作る
 「2C」の小区域を**作るな**（B・D の区域と一体に扱え）と言っています。
 この実装は条文どおりに集合 S で切るので、その小区域を作ります。
 
-小区域を分けること自体は**厳しい側**です（算定位置が増え、区域ごとの
-適合建築物はその区域の前面道路すべての最小になる）。ただし方式と食い違うので、
-JCBA 報告書の原典が手に入ったら確認が要ります（照合台帳の食い違い AD）。
+直樹に確認したところ、その一体の区域でも **C の斜線はかかる**とのことでした。
+区域ごとの適合建築物はその区域の前面道路**すべて**の最小なので、小区域を
+独立に切っても B・D と一体に扱っても、**その場所にかかる制限は同じ**です
+（`min(B, C)` は区分の仕方に依らない）。図1-6-1 の「一体処理」は区域図の
+描き方の話で、制限の中身の話ではありませんでした。よってこの実装のままで
+正しく、変更は不要です（照合台帳の食い違い AD）。
 """
 from __future__ import annotations
 
 import itertools
+import math
 from dataclasses import dataclass
 
 from shapely.geometry import Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
-from ..geometry import offset_polygon_by_edge_distances
+from ..geometry import Point, offset_polygon_by_edge_distances
 from ..site import Site
-from ..zoning import UndeterminedRegulation
+from ..zoning import UndeterminedRegulation, road_slant_tier
+from . import road_slant
 
 #: 令132条1項: 最大幅員の境界線から「幅員の2倍」以内
 WIDTH_FACTOR = 2.0
@@ -89,6 +94,10 @@ NARROW_ROAD_M = 4.0
 MAX_ROADS = 6
 
 _EPS = 1e-9
+
+#: 区域が辺に「面している」と見なす許容差(m)。多角形の演算で境界線が
+#: わずかに内側へずれることがあるので、その分だけ広げて拾います。
+_FRONTAGE_TOLERANCE_M = 1e-6
 
 
 @dataclass(frozen=True)
@@ -299,3 +308,112 @@ def region_at(site: Site, point) -> RoadRegion | None:
         if region.polygon.covers(p):
             return region
     return None
+
+
+# === 天空率のための補助（令135条の6第3項・令135条の9第3項）=============
+
+def sky_regions(site: Site) -> list[RoadRegion]:
+    """天空率を区域ごとに評価する単位。前面道路が1本以下なら空リスト。
+
+    令135条の6第3項・令135条の9第3項は、前面道路が2以上ある場合に
+    「第百三十二条又は第百三十四条第二項に規定する区域ごと」に適合建築物・
+    算定位置・計画建築物を切り分けて比べることを求めています。
+
+    **令134条2項を選んだ敷地では止まります。** あちらは公園等がある前面道路を
+    基準に全前面道路をみなす別の区域区分で、MVCE は点ごとの判定
+    （`road_slant.article_134_2_span`）しか持っておらず、多角形の区域を
+    作れません。近似するとどちら向きにずれるか言えないので、原則Hにより
+    `UndeterminedRegulation` を送出します（`apply_article_134_2` を外せば
+    令132条1項によることになり、計算できます）。
+
+    斜線制限は令134条2項を点ごとに扱えるので、そちらは
+    `article_132_regions()` / `region_at_point()` をそのまま使います。
+    この関数は**天空率専用**です。
+    """
+    roads = [i for i, e in enumerate(site.edges) if e.is_road]
+    if len(roads) < 2:
+        return []
+    has_park = any(
+        site.edges[i].relaxation.active
+        and site.edges[i].relaxation.kind in road_slant.ROAD_RELAXATION_KINDS
+        for i in roads
+    )
+    if site.apply_article_134_2 and has_park:
+        raise UndeterminedRegulation(
+            "令134条2項（apply_article_134_2）を選んだ敷地です。令135条の6第3項・"
+            "令135条の9第3項が求める「令134条2項に規定する区域」を MVCE は"
+            "多角形として作れないため、天空率による道路高さ制限の適用除外は"
+            "判定できません。令132条1項による（apply_article_134_2 を外す）か、"
+            "斜線制限のまま（use_sky_ratio: false）で計算してください。"
+        )
+    return article_132_regions(site)
+
+
+def applicable_distance_band(site: Site, edge_index: int,
+                             width_m: float | None = None) -> BaseGeometry | None:
+    """辺 `edge_index` の道路高さ制限が適用される、敷地内の帯。
+
+    法56条1項1号は「前面道路の反対側の境界線からの水平距離が別表第三（は）欄
+    の適用距離以下の範囲内において」制限すると定めています。反対側の境界線は
+    敷地の境界線から（幅員＋緩和分）だけ外側にあるので、敷地内の帯の奥行きは
+
+        適用距離 − （幅員 + 壁面後退 + 令134条による追加分）
+
+    です。届かなければ `None`（その辺の道路高さ制限は敷地に及ばない）。
+
+    `width_m` に令132条のみなし幅員を渡すと、その区域での帯になります。
+    みなし幅員は実幅員以上なので、帯は**浅く**なります。制限がかかる範囲が
+    狭まるぶん適合建築物も計画建築物も同じだけ切られるので、比較は成り立ちます。
+    """
+    edge = site.edges[edge_index]
+    if not edge.is_road:
+        return None
+    tier = road_slant_tier(site.zoning.zone_type, site.zoning.far_ratio,
+                           site.zoning.unspecified_road_slant_slope)
+    width = edge.road_width_m if width_m is None else width_m
+    base = width + edge.wall_setback_m + road_slant._relaxation_extra(edge)
+    depth = tier.applicable_distance_m - base
+    if depth <= 0:
+        return None
+    return _clean(_within(site, edge_index, depth))
+
+
+def region_frontage(site: Site, region: RoadRegion, edge_index: int,
+                    within: BaseGeometry | None = None) -> tuple[Point, Point] | None:
+    """区域が辺 `edge_index` に面している部分の両端。面していなければ None。
+
+    令135条の9第1項1号（第3項で読み替え後）の「当該建築物の敷地（道路高さ
+    制限が適用される範囲内の部分に限る。）の区域ごとの前面道路に面する部分の
+    両端」です。`within` を渡すとその範囲との共通部分で測ります。
+    """
+    from shapely.geometry import LineString
+
+    area: BaseGeometry = region.polygon
+    if within is not None:
+        area = area.intersection(within)
+    if area.is_empty:
+        return None
+    edge = site.edges[edge_index]
+    line = LineString([edge.p1, edge.p2])
+    touching = area.intersection(line.buffer(_FRONTAGE_TOLERANCE_M, cap_style=2))
+    if touching.is_empty:
+        return None
+    # 辺の方向に射影して両端を取る
+    (x1, y1), (x2, y2) = edge.p1, edge.p2
+    dx, dy = x2 - x1, y2 - y1
+    length = math.hypot(dx, dy)
+    if length <= _EPS:
+        return None
+    ux, uy = dx / length, dy / length
+    ts = [
+        ((x - x1) * ux + (y - y1) * uy) / length
+        for poly in _polygons(touching)
+        for x, y in poly.exterior.coords
+    ]
+    if not ts:
+        return None
+    t_lo = max(0.0, min(ts))
+    t_hi = min(1.0, max(ts))
+    if t_hi - t_lo <= _EPS:
+        return None
+    return ((x1 + dx * t_lo, y1 + dy * t_lo), (x1 + dx * t_hi, y1 + dy * t_hi))
