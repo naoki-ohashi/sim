@@ -101,9 +101,9 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from ..far import effective_far_limit
 from ..geometry import Point, outward_normal, point_line_distance
 from ..site import Boundary, RelaxationKind, Site
-from ..zoning import UndeterminedRegulation, road_slant_tier
 
 # 令134条1項の緩和対象: 「公園、広場、水面その他これらに類するもの」。
 # 線路敷は列挙されていないので入れない。都市公園を除く規定も無いので、
@@ -239,8 +239,7 @@ def detail_at(site: Site, point: Point, edge_index: int) -> RoadSlantDetail:
     if not edge.is_road:
         raise ValueError("道路境界線ではありません")
 
-    tier = road_slant_tier(site.zoning.zone_type, site.zoning.far_ratio,
-                           site.zoning.unspecified_road_slant_slope)
+    tier = site.zoning.road_slant_tier(effective_far_limit(site))
     span = article_134_2_span(site, point)
     if span is not None:
         # 令134条2項を選択。全前面道路が公園等のある道路と同じ幅員を持ち、
@@ -337,8 +336,7 @@ def slant_distance_for_height(site: Site, edge_index: int, height_m: float,
     edge = site.edges[edge_index]
     if not edge.is_road or height_m <= 0:
         return 0.0
-    tier = road_slant_tier(site.zoning.zone_type, site.zoning.far_ratio,
-                           site.zoning.unspecified_road_slant_slope)
+    tier = site.zoning.road_slant_tier(effective_far_limit(site))
     width = edge.road_width_m if width_m is None else width_m
     base = width + edge.wall_setback_m + _relaxation_extra(edge)
     level = _level_relaxation(edge)
@@ -358,8 +356,7 @@ def required_setback_for_height(site: Site, edge_index: int, height_m: float) ->
     if not edge.is_road or height_m <= 0:
         return 0.0
 
-    tier = road_slant_tier(site.zoning.zone_type, site.zoning.far_ratio,
-                           site.zoning.unspecified_road_slant_slope)
+    tier = site.zoning.road_slant_tier(effective_far_limit(site))
     # 幅員は最も不利（読み替えなし）の値で見る。読み替えは点ごとの判定なので、
     # ここでは安全側に実幅員を使う。
     base = edge.road_width_m + edge.wall_setback_m + _relaxation_extra(edge)

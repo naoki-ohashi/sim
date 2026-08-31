@@ -214,9 +214,31 @@
     if (row === undefined) throw new Error('不明な用途地域: ' + zone);
     return row;
   }
-  function roadSlantTier(zone, far, unspecifiedSlope) {
-    for (const [upper, dist, slope] of ROAD_SLANT_TABLE[roadSlantRow(zone)]) {
+  // 別表第三 備考三: 一の項のうち中高層住専（**指定**容積率 40/10 以上）と
+  // 1住居・2住居・準住居で、特定行政庁が指定する区域は距離が1段階短くなり
+  // 勾配が 1.5 になる。低層住専・田園住居は列挙されていないので対象外。
+  // どちらも緩和なので、指定なし（既定）は厳しい側。
+  const TABLE3_NOTE3_DISTANCE_M = { 25: 20, 30: 25, 35: 30 };
+  const TABLE3_NOTE3_SLOPE = 1.5;
+  const TABLE3_NOTE3_MID_RISE_MIN_FAR = 4.0;
+
+  function table3Note3Applies(zone, designatedFar, designated) {
+    if (!designated) return false;
+    if (MID_RISE.has(zone)) return designatedFar >= TABLE3_NOTE3_MID_RISE_MIN_FAR - 1e-9;
+    return OTHER_RESIDENTIAL.has(zone);
+  }
+
+  // far は別表第三（ろ）欄の「法52条1項・2項・7項・9項による容積率の限度」。
+  // 指定容積率ではない（effectiveFarLimit を渡すこと）。designatedFar は
+  // 備考三の判定にだけ使う指定容積率。
+  function roadSlantTier(zone, far, unspecifiedSlope, note3Designated, designatedFar) {
+    const row = roadSlantRow(zone);
+    for (const [upper, dist, slope] of ROAD_SLANT_TABLE[row]) {
       if (upper !== null && far > upper) continue;
+      if (row === 1 && table3Note3Applies(
+          zone, designatedFar === undefined ? far : designatedFar, note3Designated)) {
+        return { dist: TABLE3_NOTE3_DISTANCE_M[dist] || dist, slope: TABLE3_NOTE3_SLOPE };
+      }
       if (slope !== null) return { dist, slope };
       if (unspecifiedSlope === undefined || unspecifiedSlope === null) {
         throw new Error(
@@ -405,6 +427,25 @@
       (m, e) => (e.kind === 'road' ? Math.max(m, roadFarWidth(e).widthM) : m), 0);
   }
 
+  // 別表第三（ろ）欄の「第五十二条第一項、第二項、第七項及び第九項の規定に
+  // よる容積率の限度」。指定容積率ではなく、前面道路幅員による低減などを
+  // 反映した実際の限度。computeFar と同じ値だが notes を作らない
+  // （道路斜線の適用距離を引くのに点ごとに何万回も呼ばれるため）。
+  function effectiveFarLimit(site) {
+    const designated = site.zoning.farRatio;
+    const width = farRoadWidthM(site);
+    if (width <= 0 || width >= FAR_ROAD_WIDTH_THRESHOLD_M) return designated;
+    return Math.min(designated, width * farRoadCoefficient(
+      site.zoning.zoneType, site.zoning.farRoadCoefficientDesignated));
+  }
+
+  function siteRoadSlantTier(site) {
+    return roadSlantTier(
+      site.zoning.zoneType, effectiveFarLimit(site),
+      site.zoning.unspecifiedRoadSlantSlope,
+      site.zoning.roadSlantNote3Designated, site.zoning.farRatio);
+  }
+
   function computeFar(site) {
     const designated = site.zoning.farRatio;
     const notes = [];
@@ -559,8 +600,7 @@
   function roadHeightLimit(site, point) {
     const roads = site.edges.filter(e => e.kind === 'road');
     if (!roads.length) return Infinity;
-    const tier = roadSlantTier(site.zoning.zoneType, site.zoning.farRatio,
-      site.zoning.unspecifiedRoadSlantSlope);
+    const tier = siteRoadSlantTier(site);
     let limit = Infinity;
     for (const edge of roads) {
       const span = article1342Span(site, point);
@@ -686,8 +726,7 @@
   function roadRequiredSetback(site, edgeIndex, heightM) {
     const edge = site.edges[edgeIndex];
     if (edge.kind !== 'road' || heightM <= 0) return 0;
-    const tier = roadSlantTier(site.zoning.zoneType, site.zoning.farRatio,
-      site.zoning.unspecifiedRoadSlantSlope);
+    const tier = siteRoadSlantTier(site);
     const base = edge.roadWidthM + edge.wallSetbackM + relaxWidth(edge, ROAD_RELAX, false);
     const level = roadLevelRelax(edge);
     const h0 = tier.slope * base + level;
@@ -704,8 +743,7 @@
   function roadSlantDistanceForHeight(site, edgeIndex, heightM) {
     const edge = site.edges[edgeIndex];
     if (edge.kind !== 'road' || heightM <= 0) return 0;
-    const tier = roadSlantTier(site.zoning.zoneType, site.zoning.farRatio,
-      site.zoning.unspecifiedRoadSlantSlope);
+    const tier = siteRoadSlantTier(site);
     const base = edge.roadWidthM + edge.wallSetbackM + relaxWidth(edge, ROAD_RELAX, false);
     const level = roadLevelRelax(edge);
     if (heightM <= tier.slope * base + level) return 0;
@@ -821,8 +859,7 @@
     if (!roads.length) return null;
     const i = roads[0];
     const edge = site.edges[i];
-    const tier = roadSlantTier(site.zoning.zoneType, site.zoning.farRatio,
-      site.zoning.unspecifiedRoadSlantSlope);
+    const tier = siteRoadSlantTier(site);
     const base = edge.roadWidthM + edge.wallSetbackM + relaxWidth(edge, ROAD_RELAX, false);
     const depth = tier.dist - base;
     return depth > 0 ? { edgeIndex: i, depth } : null;

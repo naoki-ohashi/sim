@@ -75,9 +75,10 @@ from shapely.geometry import Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
+from ..far import effective_far_limit
 from ..geometry import Point, offset_polygon_by_edge_distances
 from ..site import Site
-from ..zoning import UndeterminedRegulation, road_slant_tier
+from ..zoning import UndeterminedRegulation
 from . import road_slant
 
 #: 令132条1項: 最大幅員の境界線から「幅員の2倍」以内
@@ -368,8 +369,7 @@ def applicable_distance_band(site: Site, edge_index: int,
     edge = site.edges[edge_index]
     if not edge.is_road:
         return None
-    tier = road_slant_tier(site.zoning.zone_type, site.zoning.far_ratio,
-                           site.zoning.unspecified_road_slant_slope)
+    tier = site.zoning.road_slant_tier(effective_far_limit(site))
     width = edge.road_width_m if width_m is None else width_m
     base = width + edge.wall_setback_m + road_slant._relaxation_extra(edge)
     depth = tier.applicable_distance_m - base

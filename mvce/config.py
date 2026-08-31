@@ -77,6 +77,9 @@ def _build_zoning(data: dict) -> ZoningParams:
         # 未指定のまま既定の 6/10 で計算すると緩い側に出ます。
         far_road_coefficient_designated=_optional_ratio(
             data.get("far_road_coefficient_designated")),
+        # 別表第三 備考三（道路斜線の距離1段階短縮・勾配1.5）。どちらも緩和。
+        road_slant_note3_designated=data.get(
+            "road_slant_note3_designated", False),
     )
 
 

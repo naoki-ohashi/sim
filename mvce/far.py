@@ -130,6 +130,30 @@ def far_road_width_m(site) -> float:
     return max((road_far_width(e).width_m for e in site.road_edges), default=0.0)
 
 
+def effective_far_limit(site) -> float:
+    """法52条1項・2項・7項・9項による容積率の限度。**別表第三（ろ）欄の値**です。
+
+        別表第三（ろ）欄
+        第五十二条第一項、第二項、第七項及び第九項の規定による容積率の限度
+
+    列挙されているのは1項（指定容積率）・2項（前面道路幅員による低減）・
+    7項（またがりの按分）・9項（特定道路）で、**3項（地階の不算入）・8項
+    （住宅の割増）・10〜14項（許可等）は入っていません**。MVCE が実装して
+    いるのはちょうど 1項・2項・7項・9項 なので、この4つで決まる値がそのまま
+    （ろ）欄の値になります。
+
+    `compute_far()` と同じ値を返しますが、**説明文（notes）を作りません**。
+    道路斜線の適用距離を引くのに点ごとに何万回も呼ばれるためです。
+    """
+    if site.zone_split is not None and not site.zone_split.is_single:
+        return compute_far(site).effective_far
+    designated = site.zoning.far_ratio
+    width = far_road_width_m(site)
+    if width <= 0 or width >= FAR_ROAD_WIDTH_THRESHOLD_M:
+        return designated
+    return min(designated, width * site.zoning.far_road_coefficient())
+
+
 @dataclass
 class FarResult:
     designated_far: float          # 都市計画で定められた容積率（比）

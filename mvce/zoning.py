@@ -202,24 +202,83 @@ def road_slant_row(zone_type: str) -> int:
     return row
 
 
+# --- 別表第三 備考三 -------------------------------------------------
+#
+#     三　この表（い）欄一の項に掲げる第一種中高層住居専用地域若しくは
+#     第二種中高層住居専用地域（第五十二条第一項第二号の規定により、容積率の
+#     限度が十分の四十以上とされている地域に限る。）又は第一種住居地域、
+#     第二種住居地域若しくは準住居地域のうち、特定行政庁が都道府県都市計画
+#     審議会の議を経て指定する区域内の建築物については、（は）欄一の項中
+#     「二十五メートル」とあるのは「二十メートル」と、「三十メートル」と
+#     あるのは「二十五メートル」と、「三十五メートル」とあるのは
+#     「三十メートル」と、（に）欄一の項中「一・二五」とあるのは
+#     「一・五」とする。
+#
+# 距離が1段階短くなり、勾配が急になるので、**どちらも緩和**です。
+# 対象は一の項のうち中高層住専（容積率40/10以上）と1住居・2住居・準住居だけ。
+# **低層住専・田園住居は列挙されていない**ので対象外です。
+
+#: 備考三の（は）欄の読み替え。20m はそのまま。
+TABLE3_NOTE3_DISTANCE_M: dict[float, float] = {25.0: 20.0, 30.0: 25.0, 35.0: 30.0}
+#: 備考三の（に）欄の読み替え
+TABLE3_NOTE3_SLOPE = 1.5
+#: 備考三が中高層住専にかかる容積率の下限（十分の四十）。
+#: **これは「第五十二条第一項第二号の規定により」なので指定容積率**で、
+#: （ろ）欄の「1項・2項・7項・9項による限度」とは別の値です。
+TABLE3_NOTE3_MID_RISE_MIN_FAR = 4.0
+
+
+def table3_note3_applies(zone_type: str, designated_far: float,
+                         designated: bool) -> bool:
+    """別表第三 備考三の指定区域に当たるか。
+
+    `designated_far` は**指定容積率**（法52条1項2号の数値）です。
+    """
+    if not designated:
+        return False
+    if zone_type in MID_RISE_ZONES:
+        return designated_far >= TABLE3_NOTE3_MID_RISE_MIN_FAR - 1e-9
+    return zone_type in OTHER_RESIDENTIAL_ZONES
+
+
 def road_slant_tier(
     zone_type: str,
-    far_ratio: float,
+    far_limit: float,
     unspecified_slope: float | None = None,
+    note3_designated: bool = False,
+    designated_far: float | None = None,
 ) -> RoadSlantTier:
     """別表第三から（適用距離, 勾配）を引く。
+
+    `far_limit` は（ろ）欄の「**第五十二条第一項、第二項、第七項及び第九項の
+    規定による容積率の限度**」です。指定容積率ではなく、前面道路幅員による
+    低減などを反映した**実際に適用される限度**を渡してください
+    （`far.effective_far_limit(site)`）。
 
     `unspecified_slope` は五の項（用途地域の指定のない区域）でのみ使います。
     条文が「一・二五又は一・五のうち特定行政庁が定めるもの」としており、
     どちらかを勝手に決められないためです。指定が無い無指定区域では
     `UndeterminedRegulation` を送出します。
+
+    `note3_designated` は備考三の指定区域かどうか。`designated_far` は
+    その判定に使う**指定容積率**で、省略すると `far_limit` を使います。
     """
     row = road_slant_row(zone_type)
     for tier in ROAD_SLANT_TABLE[row]:
-        if tier.far_upper is None or far_ratio <= tier.far_upper:
+        if tier.far_upper is None or far_limit <= tier.far_upper:
             break
     else:  # pragma: no cover - 各項の最後は far_upper=None
         raise AssertionError("到達しない: 最後の段は far_upper=None")
+
+    if row == 1 and table3_note3_applies(
+            zone_type,
+            far_limit if designated_far is None else designated_far,
+            note3_designated):
+        return RoadSlantTier(
+            tier.far_upper,
+            TABLE3_NOTE3_DISTANCE_M.get(tier.applicable_distance_m,
+                                        tier.applicable_distance_m),
+            TABLE3_NOTE3_SLOPE)
 
     if tier.slope is not None:
         return tier
@@ -775,6 +834,12 @@ class ZoningParams:
     #: 都市計画図で確認してください。
     far_road_coefficient_designated: float | None = None
 
+    #: 別表第三 備考三の指定区域か。中高層住専（**指定**容積率 40/10 以上）と
+    #: 1住居・2住居・準住居が対象で、低層住専・田園住居は対象外です。
+    #: True にすると道路斜線の適用距離が1段階短くなり、勾配が 1.25 → 1.5 に
+    #: なります。**どちらも緩和**なので、既定 False は厳しい側です。
+    road_slant_note3_designated: bool = False
+
     def __post_init__(self) -> None:
         if self.zone_type not in ALL_ZONES:
             raise ValueError(f"不明な用途地域: {self.zone_type!r}（有効: {sorted(ALL_ZONES)}）")
@@ -837,6 +902,17 @@ class ZoningParams:
     @property
     def label_ja(self) -> str:
         return ZONE_LABELS_JA[self.zone_type]
+
+    def road_slant_tier(self, far_limit: float) -> RoadSlantTier:
+        """別表第三の段。`far_limit` は（ろ）欄の容積率の限度。
+
+        呼び出し側が `far.effective_far_limit(site)` を渡します。備考三の
+        判定に使う**指定**容積率はこちらが持っているので、ここで渡します。
+        """
+        return road_slant_tier(
+            self.zone_type, far_limit, self.unspecified_road_slant_slope,
+            note3_designated=self.road_slant_note3_designated,
+            designated_far=self.far_ratio)
 
     def far_road_coefficient(self) -> float:
         """法52条2項の低減係数（括弧書きの指定を反映したもの）。"""

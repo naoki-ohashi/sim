@@ -692,3 +692,136 @@ def test_the_sky_ratio_baseline_is_not_removed_either():
 
     site = _setback_site("commercial", 6.0, True)
     assert adjacent_baseline_distance_m(site) == pytest.approx(12.4)
+
+
+# === 別表第三（ろ）欄は「実際に適用される容積率の限度」================
+#
+#     （ろ）第五十二条第一項、第二項、第七項及び第九項の規定による容積率の限度
+#
+# 1項（指定容積率）だけでなく **2項（前面道路幅員による低減）・7項（按分）・
+# 9項（特定道路）も入っています**。指定容積率で引くと、道路が狭くて容積率が
+# 下がっている敷地で適用距離を長く取りすぎます（厳しい側ですが条文と違う）。
+
+def _road_site(zone="1res", far=4.0, road=6.0, **kw):
+    from mvce.site import Site as _S
+    specs = [{"kind": "road", "road_width_m": road}, {"kind": "adjacent"},
+             {"kind": "adjacent"}, {"kind": "adjacent"}]
+    return _S.from_rings([(0, 0), (30, 0), (30, 20), (0, 20)], specs,
+                         ZoningParams(zone_type=zone, far_ratio=far,
+                                      coverage_ratio=0.6, **kw))
+
+
+def test_the_lo_column_uses_the_road_reduced_limit():
+    """指定400%・6m道路なら限度は240%。適用距離は 30m ではなく 25m。"""
+    from mvce.far import effective_far_limit
+    from mvce.regulations import road_slant
+
+    site = _road_site(zone="1res", far=4.0, road=6.0)
+    assert effective_far_limit(site) == pytest.approx(2.4)
+    # 指定容積率 4.0 で引くと「30/10 超 40/10 以下」→ 30m
+    assert road_slant_tier("1res", 4.0).applicable_distance_m == pytest.approx(30.0)
+    # 限度 2.4 で引くと「20/10 超 30/10 以下」→ 25m。こちらが条文どおり
+    assert road_slant.detail_at(site, (15.0, 1.0), 0).applicable_distance_m \
+        == pytest.approx(25.0)
+
+
+def test_a_wide_road_leaves_the_designated_limit_alone():
+    """12m以上の道路なら2項の低減が無いので、指定容積率がそのまま（ろ）欄。"""
+    from mvce.far import effective_far_limit
+    from mvce.regulations import road_slant
+
+    site = _road_site(zone="1res", far=4.0, road=12.0)
+    assert effective_far_limit(site) == pytest.approx(4.0)
+    assert road_slant.detail_at(site, (15.0, 1.0), 0).applicable_distance_m \
+        == pytest.approx(30.0)
+
+
+def test_the_specified_road_addition_feeds_the_lo_column():
+    """法52条9項の加算は（ろ）欄に入る（同項が明示的に列挙されている）。"""
+    from mvce.far import effective_far_limit
+    from mvce.site import Site as _S
+
+    specs = [{"kind": "road", "road_width_m": 6.0,
+              "specified_road": {"width_m": 15.0, "distance_m": 0.0}},
+             {"kind": "adjacent"}, {"kind": "adjacent"}, {"kind": "adjacent"}]
+    site = _S.from_rings([(0, 0), (30, 0), (30, 20), (0, 20)], specs,
+                         ZoningParams(zone_type="1res", far_ratio=4.0,
+                                      coverage_ratio=0.6))
+    # L=0 なら Wa = 12−6 = 6 で、みなし幅員 12m → 2項の低減が外れる
+    assert effective_far_limit(site) == pytest.approx(4.0)
+
+
+# === 別表第三 備考三 ==================================================
+#
+#     三　この表（い）欄一の項に掲げる第一種中高層住居専用地域若しくは
+#     第二種中高層住居専用地域（第五十二条第一項第二号の規定により、容積率の
+#     限度が十分の四十以上とされている地域に限る。）又は第一種住居地域、
+#     第二種住居地域若しくは準住居地域のうち、特定行政庁が…指定する区域内の
+#     建築物については、（は）欄一の項中「二十五メートル」とあるのは
+#     「二十メートル」と、「三十メートル」とあるのは「二十五メートル」と、
+#     「三十五メートル」とあるのは「三十メートル」と、（に）欄一の項中
+#     「一・二五」とあるのは「一・五」とする。
+
+
+@pytest.mark.parametrize("plain,shortened", [(20.0, 20.0), (25.0, 20.0),
+                                             (30.0, 25.0), (35.0, 30.0)])
+def test_note3_shortens_the_distance_by_one_step(plain, shortened):
+    """20m はそのまま。25→20 / 30→25 / 35→30。"""
+    from mvce.zoning import TABLE3_NOTE3_DISTANCE_M
+    assert TABLE3_NOTE3_DISTANCE_M.get(plain, plain) == pytest.approx(shortened)
+
+
+@pytest.mark.parametrize("far,expected_distance", [
+    (2.0, 20.0), (3.0, 20.0), (4.0, 25.0), (6.0, 30.0)])
+def test_note3_on_a_residential_zone(far, expected_distance):
+    """1住居・2住居・準住居は容積率の条件なしで備考三の対象。"""
+    tier = road_slant_tier("1res", far, note3_designated=True)
+    assert tier.applicable_distance_m == pytest.approx(expected_distance)
+    assert tier.slope == pytest.approx(1.5)
+
+
+def test_note3_needs_forty_tenths_for_a_mid_rise_zone():
+    """中高層住専は**指定**容積率が 40/10 以上のときだけ対象。"""
+    # 指定 40/10 → 対象
+    assert road_slant_tier("1mid", 4.0, note3_designated=True,
+                           designated_far=4.0).slope == pytest.approx(1.5)
+    # 指定 30/10 → 対象外。距離も勾配も本来のまま
+    tier = road_slant_tier("1mid", 3.0, note3_designated=True, designated_far=3.0)
+    assert tier.slope == pytest.approx(1.25)
+    assert tier.applicable_distance_m == pytest.approx(25.0)
+
+
+def test_note3_uses_the_designated_far_not_the_lo_column_value():
+    """中高層住専の 40/10 判定は「第五十二条第一項第二号の規定により」＝指定容積率。
+
+    （ろ）欄の限度（2項の低減後）とは別の値です。指定 40/10 の中高層住専が
+    狭い道路で限度 24/10 に落ちていても、備考三の対象であることは変わりません。
+    """
+    tier = road_slant_tier("1mid", 2.4, note3_designated=True, designated_far=4.0)
+    assert tier.slope == pytest.approx(1.5)
+    # 段は（ろ）欄の 2.4 で引くので「20/10超30/10以下」の 25m → 備考三で 20m
+    assert tier.applicable_distance_m == pytest.approx(20.0)
+
+
+@pytest.mark.parametrize("zone", ["1low", "2low", "denen"])
+def test_note3_does_not_reach_low_rise_zones(zone):
+    """低層住専・田園住居は一の項だが備考三に列挙されていない。"""
+    tier = road_slant_tier(zone, 4.0, note3_designated=True, designated_far=4.0)
+    assert tier.slope == pytest.approx(1.25)
+    assert tier.applicable_distance_m == pytest.approx(30.0)
+
+
+@pytest.mark.parametrize("zone,far", [("commercial", 6.0), ("quasi_industrial", 4.0)])
+def test_note3_does_not_reach_other_rows(zone, far):
+    """備考三は「（い）欄一の項に掲げる」ものだけ。二の項・三の項には及ばない。"""
+    plain = road_slant_tier(zone, far)
+    marked = road_slant_tier(zone, far, note3_designated=True, designated_far=far)
+    assert marked == plain
+
+
+def test_note3_is_a_relaxation_in_both_directions():
+    """距離が短く・勾配が急 ＝ どちらも緩和。既定 False が厳しい側であること。"""
+    plain = road_slant_tier("1res", 4.0)
+    marked = road_slant_tier("1res", 4.0, note3_designated=True)
+    assert marked.applicable_distance_m < plain.applicable_distance_m
+    assert marked.slope > plain.slope

@@ -39,7 +39,8 @@ SQUARE = [(0.0, 0.0), (30.0, 0.0), (30.0, 20.0), (0.0, 20.0)]
 
 
 def _site(specs=None, zone="1res", far=2.0, coverage=0.6, north=0.0, setback=0.0,
-          height=None, shadow_designated=False, far_coefficient_designated=None):
+          height=None, shadow_designated=False, far_coefficient_designated=None,
+          note3_designated=False):
     if specs is None:
         specs = [
             {"kind": "road", "road_width_m": 6.0, "wall_setback_m": setback},
@@ -51,7 +52,8 @@ def _site(specs=None, zone="1res", far=2.0, coverage=0.6, north=0.0, setback=0.0
         SQUARE, specs,
         ZoningParams(zone, far, coverage, absolute_height_limit_m=height,
                      shadow_ordinance_designated=shadow_designated,
-                     far_road_coefficient_designated=far_coefficient_designated),
+                     far_road_coefficient_designated=far_coefficient_designated,
+                     road_slant_note3_designated=note3_designated),
         north=NorthReference(north_angle_deg=north))
 
 
@@ -79,6 +81,7 @@ def _js_site(site):
             "shadowOrdinanceDesignated": site.zoning.shadow_ordinance_designated,
             "farRoadCoefficientDesignated":
                 site.zoning.far_road_coefficient_designated,
+            "roadSlantNote3Designated": site.zoning.road_slant_note3_designated,
         },
         "northAngleDeg": site.north.north_angle_deg,
         "floorHeightM": site.floor_height_m,
@@ -137,6 +140,54 @@ def test_far_matches(zone, far, width):
         assert js["roadFar"] is None
     else:
         assert js["roadFar"] == pytest.approx(py.road_far)
+
+
+#: (用途地域, 指定容積率, 道路幅員, 備考三の指定, 備考三が効くか)
+TABLE3_CASES = [
+    ("1res", 4.0, 6.0, False, False),
+    ("1res", 4.0, 6.0, True, True),
+    ("1mid", 4.0, 8.0, True, True),
+    ("1mid", 3.0, 8.0, True, False),    # 中高層住専で指定容積率 40/10 未満
+    ("1low", 1.0, 6.0, True, False),    # 低層住専は備考三に列挙されていない
+    ("commercial", 6.0, 8.0, True, False),   # 二の項なので備考三は及ばない
+]
+
+
+def _table3_site(zone, far, road, note3):
+    specs = [{"kind": "road", "road_width_m": road}, {"kind": "adjacent"},
+             {"kind": "adjacent"}, {"kind": "adjacent"}]
+    return _site(specs, zone=zone, far=far,
+                 height=10.0 if zone == "1low" else None,
+                 note3_designated=note3)
+
+
+@pytest.mark.parametrize("zone,far,road,note3,note3_bites", TABLE3_CASES)
+def test_road_slant_table3_matches(zone, far, road, note3, note3_bites):
+    """別表第三（ろ）欄の実質容積率と備考三が両実装で一致すること。
+
+    片方だけ直すと道路斜線の適用距離と勾配がずれ、以後の計算が全部ずれます。
+    """
+    site = _table3_site(zone, far, road, note3)
+    points = [(15.0, 1.0), (15.0, 5.0), (15.0, 10.0), (15.0, 19.0)]
+    js = _run_js({"want": ["heightLimits"], "site": _js_site(site),
+                  "points": [list(p) for p in points]})["heightLimits"]
+    for value, point in zip(js, points):
+        py = height_limit_at(site, point)     # 全規制の合成（JS 側と同じもの）
+        if value is None:
+            assert py == float("inf")
+        else:
+            assert value == pytest.approx(py)
+
+    # このケースで備考三が実際に道路斜線を動かしているか（動かないケースは
+    # 動かないことを）確かめる。動かないケースばかりだと、JS 側が備考三を
+    # 落としていても上の突き合わせが通ってしまいます。
+    plain = _table3_site(zone, far, road, False)
+    changed = any(
+        road_slant.height_limit_at(site, p) != pytest.approx(
+            road_slant.height_limit_at(plain, p))
+        for p in points
+    )
+    assert changed is note3_bites
 
 
 @pytest.mark.parametrize("zone,designated", [
