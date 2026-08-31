@@ -242,7 +242,7 @@ def test_adjacent_slant_other_group_starts_at_31m():
 
 def test_adjacent_slant_not_applied_in_low_rise_zones():
     """低層住居専用は絶対高さ制限が先に効くので隣地斜線の適用がない。"""
-    site = _site(zone="1low", far=0.8)
+    site = _site(zone="1low", far=0.8, absolute_height=10.0)
     assert not adjacent_slant.applies(site)
     assert adjacent_slant.height_limit_at(site, (30.0, 10.0)) == math.inf
 
@@ -272,14 +272,14 @@ def test_adjacent_slant_setback_relaxation():
 # === 北側斜線 =========================================================
 
 def test_north_slant_applies_only_in_designated_zones():
-    assert north_slant.applies(_site(zone="1low", far=0.8))
+    assert north_slant.applies(_site(zone="1low", far=0.8, absolute_height=10.0))
     assert north_slant.applies(_site(zone="1mid", far=2.0))
     assert not north_slant.applies(_site(zone="1res"))
     assert not north_slant.applies(_site(zone="commercial", far=4.0))
 
 
 def test_north_slant_low_rise_starts_at_5m():
-    site = _site(zone="1low", far=0.8)
+    site = _site(zone="1low", far=0.8, absolute_height=10.0)
     # 北側境界線(y=20)上 → 5m
     assert north_slant.height_limit_at(site, (15.0, 20.0)) == pytest.approx(5.0)
     # 8m 南に離れる → 5 + 1.25*8 = 15
@@ -299,7 +299,7 @@ def test_north_slant_has_no_setback_relaxation():
         {"kind": "adjacent", "wall_setback_m": 5.0},  # 北側に大きく後退
         {"kind": "adjacent"},
     ]
-    site = _site(zone="1low", far=0.8, specs=specs)
+    site = _site(zone="1low", far=0.8, absolute_height=10.0, specs=specs)
     # 後退させても境界線上の制限は5mのまま
     assert north_slant.height_limit_at(site, (15.0, 20.0)) == pytest.approx(5.0)
 
@@ -311,7 +311,7 @@ def test_north_slant_park_relaxation_does_not_apply():
         {"kind": "adjacent", "relaxation": {"kind": "park", "width_m": 10.0}},
         {"kind": "adjacent"},
     ]
-    site = _site(zone="1low", far=0.8, specs=specs)
+    site = _site(zone="1low", far=0.8, absolute_height=10.0, specs=specs)
     assert north_slant.height_limit_at(site, (15.0, 20.0)) == pytest.approx(5.0)
 
 
@@ -321,22 +321,22 @@ def test_north_slant_water_relaxation_is_half_width():
         {"kind": "adjacent", "relaxation": {"kind": "water", "width_m": 8.0}},
         {"kind": "adjacent"},
     ]
-    site = _site(zone="1low", far=0.8, specs=specs)
+    site = _site(zone="1low", far=0.8, absolute_height=10.0, specs=specs)
     # L = 0 + 8/2 = 4 → 5 + 1.25*4 = 10
     assert north_slant.height_limit_at(site, (15.0, 20.0)) == pytest.approx(10.0)
 
 
 def test_north_slant_follows_true_north_not_plan_up():
     """真北が図面の上でない場合、北側と判定される辺が変わる。"""
-    site_default = _site(zone="1low", far=0.8)
+    site_default = _site(zone="1low", far=0.8, absolute_height=10.0)
     assert north_slant.north_edges(site_default) == [2]  # y=20 の辺
 
     # 真北が図面の左（-X）を向く → x=0 の辺が北側になる
-    site_rotated = _site(zone="1low", far=0.8, north_angle=90.0)
+    site_rotated = _site(zone="1low", far=0.8, absolute_height=10.0, north_angle=90.0)
     assert north_slant.north_edges(site_rotated) == [3]
 
 
 def test_north_slant_measures_distance_along_true_north():
-    site = _site(zone="1low", far=0.8, north_angle=90.0)  # 真北 = -X
+    site = _site(zone="1low", far=0.8, absolute_height=10.0, north_angle=90.0)  # 真北 = -X
     # 北側境界は x=0。そこから東へ8m離れた点 → 5 + 1.25*8 = 15
     assert north_slant.height_limit_at(site, (8.0, 10.0)) == pytest.approx(15.0)

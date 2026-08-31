@@ -442,3 +442,48 @@ def test_north_relaxation_excludes_parks():
     assert RelaxationKind.PARK not in NORTH_RELAXATION_KINDS
     assert RelaxationKind.URBAN_PARK not in NORTH_RELAXATION_KINDS
     assert NORTH_RELAXATION_KINDS == {RelaxationKind.WATER, RelaxationKind.RAILWAY}
+
+
+# === 法55条1項（低層住専・田園住居の絶対高さ制限）=====================
+#
+#   第五十五条　第一種低層住居専用地域、第二種低層住居専用地域又は田園住居
+#   地域内においては、建築物の高さは、**十メートル又は十二メートルのうち
+#   当該地域に関する都市計画において定められた**建築物の高さの限度を
+#   超えてはならない。
+#
+# どちらかは都市計画が定めるもので、条文に既定値はありません。
+# 以前は黙って 10.0 を入れていました（原則H 違反）。
+
+@pytest.mark.parametrize("zone", ["1low", "2low", "denen"])
+def test_low_rise_requires_the_absolute_height(zone):
+    with pytest.raises(UndeterminedRegulation, match="法55条1項"):
+        ZoningParams(zone_type=zone, far_ratio=0.8, coverage_ratio=0.5)
+
+
+@pytest.mark.parametrize("zone", ["1low", "2low", "denen"])
+@pytest.mark.parametrize("height", [10.0, 12.0])
+def test_low_rise_accepts_only_10_or_12(zone, height):
+    params = ZoningParams(zone_type=zone, far_ratio=0.8, coverage_ratio=0.5,
+                          absolute_height_limit_m=height)
+    assert params.absolute_height_limit_m == pytest.approx(height)
+
+
+@pytest.mark.parametrize("height", [8.0, 11.0, 15.0, 0.0])
+def test_low_rise_rejects_other_heights(height):
+    with pytest.raises(ValueError, match="10mか12m"):
+        ZoningParams(zone_type="1low", far_ratio=0.8, coverage_ratio=0.5,
+                     absolute_height_limit_m=height)
+
+
+def test_other_zones_have_no_absolute_height_by_default():
+    """法55条は低層住専・田園住居だけ。ほかの用途地域には絶対高さ制限が無い。"""
+    for zone in ("1mid", "1res", "commercial", "industrial", "unspecified"):
+        params = ZoningParams(zone_type=zone, far_ratio=2.0, coverage_ratio=0.6)
+        assert params.absolute_height_limit_m is None, zone
+
+
+def test_the_refusal_names_both_routes_to_12m():
+    """12m は都市計画で定めた場合と、法55条2項の緩和の場合がある。"""
+    with pytest.raises(UndeterminedRegulation) as e:
+        ZoningParams(zone_type="1low", far_ratio=0.8, coverage_ratio=0.5)
+    assert "法55条2項" in str(e.value)

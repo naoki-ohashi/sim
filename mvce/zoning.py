@@ -123,6 +123,9 @@ ROAD_SLANT_TABLE: dict[int, list[RoadSlantTier]] = {
 }
 
 #: 別表第三 五の項で特定行政庁が選べる勾配。
+#: 法55条1項: 低層住専・田園住居の絶対高さ制限（都市計画で定めるもの）
+LOW_RISE_HEIGHT_LIMITS_M = (10.0, 12.0)
+
 UNSPECIFIED_ROAD_SLANT_SLOPES = (1.25, 1.5)
 
 
@@ -445,7 +448,10 @@ class ZoningParams:
     zone_type: str
     far_ratio: float          # 都市計画で定められた容積率（比。200% なら 2.0）
     coverage_ratio: float     # 建蔽率（比。60% なら 0.6）
-    absolute_height_limit_m: float | None = None  # 法55条の絶対高さ制限（10 or 12m）
+    #: 法55条1項の絶対高さ制限。低層住専・田園住居では**必須**で、
+    #: 10.0 か 12.0 のどちらかです（都市計画で定められたもの）。
+    #: それ以外の用途地域では None。
+    absolute_height_limit_m: float | None = None
 
     #: 別表第三 五の項。用途地域の指定のない区域の道路斜線勾配。
     #: 「一・二五又は一・五のうち特定行政庁が定めるもの」なので、
@@ -491,9 +497,31 @@ class ZoningParams:
                 "unspecified_adjacent_slant_slope は 1.25 か 2.5 です"
                 f"（指定値: {self.unspecified_adjacent_slant_slope}）"
             )
-        if self.zone_type in LOW_RISE_ZONES and self.absolute_height_limit_m is None:
-            # 低層住居専用・田園住居は法55条で10mまたは12mの制限が必ずある
-            self.absolute_height_limit_m = 10.0
+        if self.zone_type in LOW_RISE_ZONES:
+            # 法55条1項:
+            #   第一種低層住居専用地域、第二種低層住居専用地域又は田園住居地域
+            #   内においては、建築物の高さは、**十メートル又は十二メートルの
+            #   うち当該地域に関する都市計画において定められた**建築物の高さの
+            #   限度を超えてはならない。
+            #
+            # どちらかは都市計画が定めるもので、条文に既定値はありません。
+            # 以前は黙って 10.0 を入れていました（原則H 違反）。10m は
+            # 厳しい側なので危険ではありませんでしたが、12m の地域で
+            # 2m ぶん小さい答えを黙って出していたことになります。
+            if self.absolute_height_limit_m is None:
+                raise UndeterminedRegulation(
+                    f"{ZONE_LABELS_JA[self.zone_type]}には法55条1項の絶対高さ制限が"
+                    "必ずありますが、10mか12mかは都市計画で定められたものです。"
+                    "absolute_height_limit_m に 10.0 か 12.0 を指定してください"
+                    "（都市計画図で確認できます）。法55条2項の緩和（10mの地域で"
+                    "空地と敷地面積の要件を満たし特定行政庁が認めるもの）で"
+                    "12mになる場合も 12.0 を指定します。"
+                )
+            if self.absolute_height_limit_m not in LOW_RISE_HEIGHT_LIMITS_M:
+                raise ValueError(
+                    "法55条1項の絶対高さ制限は10mか12mです"
+                    f"（指定値: {self.absolute_height_limit_m}）"
+                )
 
     @property
     def label_ja(self) -> str:

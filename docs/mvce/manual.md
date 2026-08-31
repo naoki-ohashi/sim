@@ -256,7 +256,8 @@ DXFから読み込む場合、閉じたポリラインか、つながった線�
     zone_type: 1res     # 下表から選ぶ
     far_ratio: 200       # 容積率(%)。都市計画で定められた値
     coverage_ratio: 60   # 建蔽率(%)
-    # absolute_height_limit_m: 10   # 低層住居専用等で絶対高さ制限がある場合
+    # absolute_height_limit_m: 10   # 法55条1項。低層住専・田園住居では**必須**
+                                    #   （10 か 12。都市計画で定められたもの）
   floor_height_m: 3.2    # 階高(m)
 ```
 
@@ -520,7 +521,7 @@ site:
     zone_type: 1res                # 4.6節の表から選ぶ
     far_ratio: 200                 # 容積率(%)
     coverage_ratio: 60             # 建蔽率(%)
-    absolute_height_limit_m: 10    # 絶対高さ制限（任意）
+    absolute_height_limit_m: 10    # 法55条1項。低層住専・田園住居では必須（10 か 12）
   floor_height_m: 3.2              # 階高(m)
 
 shadow:                            # 省略すると日影規制のチェックなし

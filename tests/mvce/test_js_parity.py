@@ -38,7 +38,8 @@ pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="Node.js �
 SQUARE = [(0.0, 0.0), (30.0, 0.0), (30.0, 20.0), (0.0, 20.0)]
 
 
-def _site(specs=None, zone="1res", far=2.0, coverage=0.6, north=0.0, setback=0.0):
+def _site(specs=None, zone="1res", far=2.0, coverage=0.6, north=0.0, setback=0.0,
+          height=None):
     if specs is None:
         specs = [
             {"kind": "road", "road_width_m": 6.0, "wall_setback_m": setback},
@@ -47,7 +48,8 @@ def _site(specs=None, zone="1res", far=2.0, coverage=0.6, north=0.0, setback=0.0
             {"kind": "adjacent", "wall_setback_m": setback},
         ]
     return Site.from_rings(
-        SQUARE, specs, ZoningParams(zone, far, coverage),
+        SQUARE, specs,
+        ZoningParams(zone, far, coverage, absolute_height_limit_m=height),
         north=NorthReference(north_angle_deg=north))
 
 
@@ -185,12 +187,16 @@ def test_height_limits_match_with_setback_and_relaxations():
 
 
 def test_height_limits_match_for_north_slant_zones():
-    for zone, far in (("1low", 0.8), ("1mid", 2.0), ("2mid", 3.0)):
-        _height_parity(_site(zone=zone, far=far), [(15, 19), (15, 10), (15, 2)])
+    # 低層住専は法55条1項の絶対高さ制限が必須（10m か 12m）
+    for zone, far, height in (("1low", 0.8, 10.0), ("1mid", 2.0, None),
+                              ("2mid", 3.0, None)):
+        _height_parity(_site(zone=zone, far=far, height=height),
+                       [(15, 19), (15, 10), (15, 2)])
 
 
 def test_height_limits_match_with_rotated_north():
-    _height_parity(_site(zone="1low", far=0.8, north=90.0), [(2, 10), (15, 10), (28, 10)])
+    _height_parity(_site(zone="1low", far=0.8, height=10.0, north=90.0),
+                   [(2, 10), (15, 10), (28, 10)])
 
 
 def test_height_limits_match_for_commercial():
@@ -330,7 +336,7 @@ def test_optimize_matches_with_two_roads():
 
 
 def test_optimize_matches_for_low_rise_zone():
-    _optimize_parity(_site(zone="1low", far=0.8, coverage=0.5), 5.0, None)
+    _optimize_parity(_site(zone="1low", far=0.8, coverage=0.5, height=10.0), 5.0, None)
 
 
 # === 天空率（法56条7項） ==============================================
@@ -389,7 +395,7 @@ def test_sky_measurement_points_follow_the_statutory_intervals():
     """
     specs = [{"kind": "road", "road_width_m": 6.0}, {"kind": "adjacent"},
              {"kind": "adjacent"}, {"kind": "adjacent"}]
-    site = _site(specs, zone="1low", far=0.8, coverage=0.5)
+    site = _site(specs, zone="1low", far=0.8, coverage=0.5, height=10.0)
     js = _run_js({"want": ["sky"], "site": _js_site(site)})["sky"]
     north = [p for p in js["measurementPoints"] if p["kind"] == "north"]
     # 北辺は 30m。1m以内の間隔で均等 → 両端を含めて31点

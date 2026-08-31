@@ -531,7 +531,24 @@
     return limit;
   }
 
+  // 法55条1項: 低層住専・田園住居には絶対高さ制限が必ずある。10mか12mかは
+  // 都市計画で定めるもので、条文に既定値は無い。黙って埋めない（原則H）。
+  function assertAbsoluteHeightGiven(site) {
+    if (!LOW_RISE.has(site.zoning.zoneType)) return;
+    if (site.zoning.absoluteHeightLimitM == null) {
+      throw new Error(
+        '低層住居専用地域・田園住居地域には法55条1項の絶対高さ制限が'
+        + '必ずあります。10mか12mかは都市計画で定められたものなので、'
+        + '「絶対高さ制限」に 10 か 12 を入れてください。');
+    }
+    if (site.zoning.absoluteHeightLimitM !== 10 && site.zoning.absoluteHeightLimitM !== 12) {
+      throw new Error('法55条1項の絶対高さ制限は10mか12mです（指定値: '
+        + site.zoning.absoluteHeightLimitM + '）');
+    }
+  }
+
   function heightLimitAt(site, point, useSkyRatio) {
+    assertAbsoluteHeightGiven(site);
     const abs = site.zoning.absoluteHeightLimitM != null ? site.zoning.absoluteHeightLimitM : Infinity;
     if (useSkyRatio) return abs;
     return Math.min(roadHeightLimit(site, point), adjacentHeightLimit(site, point),
@@ -620,6 +637,7 @@
   // 検討する高さの上限。絶対高さ制限があればそれ、無ければ頂点・重心での
   // 斜線制限の最大値に余裕を見た値（Python版 height_field.max_relevant_height 相当）
   function maxRelevantHeight(site) {
+    assertAbsoluteHeightGiven(site);
     if (site.zoning.absoluteHeightLimitM != null) return site.zoning.absoluteHeightLimitM;
     const cx = site.points.reduce((s, p) => s + p[0], 0) / site.points.length;
     const cy = site.points.reduce((s, p) => s + p[1], 0) / site.points.length;
@@ -1317,6 +1335,7 @@
     rayBoxEntry, buildShadowIndex, hoursAt, worstViolation, isShadowCompliant, shadowSummary,
     roadRequiredSetback, adjacentRequiredSetback, northRequiredSetback,
     requiredSetbackForHeight, buildableRingAtHeight, maxRelevantHeight,
+    assertAbsoluteHeightGiven,
     referenceBuilding, referenceBuildings, skyReferenceRing, skyReferenceTop,
     roadSlantDistanceForHeight, skyPointInApplicableRange,
     rayPolygonEntryDistance, silhouetteElevationRad, azimuthsDeg, skyRatioPercent,
