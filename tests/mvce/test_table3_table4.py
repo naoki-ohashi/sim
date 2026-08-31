@@ -338,14 +338,18 @@ def _roads_site(specs, **kw):
         zoning=ZoningParams(zone_type="1res", far_ratio=4.0, coverage_ratio=0.6), **kw)
 
 
-def test_three_frontages_are_undetermined():
-    """令132条2項の「これらの前面道路のみ」の扱いは運用が分かれる（食い違い W）。"""
+def test_three_frontages_now_compute():
+    """前面道路3本でも計算できる（食い違い W、2026-08-30 に解消）。
+
+    以前は令132条2項の「これらの前面道路のみ」の切り方が決まらないとして
+    `UndeterminedRegulation` で止めていました。新JCBA方式の解説で区域の
+    切り方が確認できたので、`road_regions.py` で区域を作って計算します。
+    """
     site = _roads_site([
         {"kind": "road", "road_width_m": 6.0}, {"kind": "road", "road_width_m": 4.0},
         {"kind": "road", "road_width_m": 10.0}, {"kind": "adjacent"},
     ])
-    with pytest.raises(UndeterminedRegulation):
-        road_slant.height_limit_at(site, (15.0, 15.0))
+    assert road_slant.height_limit_at(site, (15.0, 15.0)) < float("inf")
 
 
 def test_two_frontages_still_compute():

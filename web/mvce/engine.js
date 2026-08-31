@@ -439,23 +439,68 @@
     return best;
   }
 
-  // 令132条: 2以上の前面道路がある場合の幅員の読み替え。
-  // 3本以上は 2項の運用が分かれるので計算しない（Python版と同じ）。
-  function appliedRoadWidth(site, point, edge) {
-    const roads = site.edges.filter(e => e.kind === 'road');
-    if (roads.length >= 3) {
-      throw new Error(
-        '前面道路が' + roads.length + '本あります。令132条2項の「これらの前面道路のみを' +
-        '前面道路とする」の扱いは行政庁の運用が分かれるため、2本用の式では計算しません');
+  /* 令132条: 2以上の前面道路がある場合の区域区分と幅員の読み替え。
+   * Python版 regulations/road_regions.py の点ごと版（region_at_point）相当。
+   *
+   *   1項 … 最大幅員 A の 2A かつ 35m 以内、**または**他の全前面道路の
+   *          中心線から 10m 超 → 全前面道路が A
+   *   2項 … 1項の外で 2以上の道路の到達範囲 → それらのうち最大の幅員
+   *   3項 … 1項・2項の外 → その接する前面道路のみ
+   *
+   * 到達範囲 reach(W) = min(35, 2W)  （W < 4m なら min(35, 10 − W/2)）
+   *
+   * **1項の 2A 区域を生むのは最大幅員の道路だけ。** 狭い道路側からは
+   * 区分しない（新JCBA方式の解説。docs/mvce/methods/新JCBA方式_要点.md）。
+   */
+  const ROAD_REGION_MAX_ROADS = 6;
+
+  function roadReachM(widthM) {
+    const base = widthM >= 4.0 ? 2 * widthM : 10.0 - widthM / 2;
+    return Math.min(base, 35.0);
+  }
+  const roadCentrelineReachM = widthM => Math.max(0, 10.0 - widthM / 2);
+
+  // {paragraph, roadIndices, deemedWidthM} か null
+  function roadRegionAt(site, point) {
+    const roads = site.edges
+      .map((e, i) => (e.kind === 'road' ? i : -1)).filter(i => i >= 0);
+    if (roads.length < 2) return null;
+    if (roads.length > ROAD_REGION_MAX_ROADS) {
+      throw new Error('前面道路が' + roads.length + '本あります。令132条の区域区分は'
+        + ROAD_REGION_MAX_ROADS + '本までしか扱いません。');
     }
-    const widest = maxRoadWidth(site);
-    if (roads.length < 2 || edge.roadWidthM >= widest) return edge.roadWidthM;
-    const wideEdge = roads.reduce((a, b) => (b.roadWidthM > a.roadWidthM ? b : a));
-    const dWide = pointLineDistance(point, wideEdge.p1, wideEdge.p2);
-    const inA = dWide <= 2 * widest + 1e-9 && dWide <= 35 + 1e-9;
-    const dCentre = pointLineDistance(point, edge.p1, edge.p2) + edge.roadWidthM / 2;
-    const inB = dCentre > 10 + 1e-9;
-    return (inA || inB) ? widest : edge.roadWidthM;
+    const w = i => site.edges[i].roadWidthM;
+    const maxWidth = Math.max(...roads.map(w));
+    const widest = roads.filter(i => w(i) >= maxWidth - 1e-9);
+    const dist = {};
+    for (const i of roads) {
+      dist[i] = pointLineDistance(point, site.edges[i].p1, site.edges[i].p2);
+    }
+    const limitA = Math.min(2 * maxWidth, 35.0);
+    const inA = widest.some(i => dist[i] <= limitA + 1e-9);
+    const inB = roads.filter(i => !widest.includes(i))
+      .every(i => dist[i] > roadCentrelineReachM(w(i)) + 1e-9);
+    if (inA || inB) {
+      return { paragraph: 1, roadIndices: roads, deemedWidthM: maxWidth };
+    }
+    const subset = roads.filter(i => dist[i] <= roadReachM(w(i)) + 1e-9);
+    if (!subset.length) return null;
+    return {
+      paragraph: subset.length >= 2 ? 2 : 3,
+      roadIndices: subset,
+      deemedWidthM: Math.max(...subset.map(w)),
+    };
+  }
+
+  function appliedRoadWidth(site, point, edge) {
+    const region = roadRegionAt(site, point);
+    if (!region) return edge.roadWidthM;
+    const edgeIndex = site.edges.indexOf(edge);
+    if (edgeIndex < 0 || !region.roadIndices.includes(edgeIndex)) {
+      // その点ではこの道路は前面道路ではない（令132条2項・3項）
+      return edge.roadWidthM;
+    }
+    return region.deemedWidthM;
   }
 
   function roadHeightLimit(site, point) {
@@ -1344,6 +1389,7 @@
     rayBoxEntry, buildShadowIndex, hoursAt, worstViolation, isShadowCompliant, shadowSummary,
     roadRequiredSetback, adjacentRequiredSetback, northRequiredSetback,
     requiredSetbackForHeight, buildableRingAtHeight, maxRelevantHeight,
+    roadRegionAt, roadReachM, roadCentrelineReachM,
     assertAbsoluteHeightGiven,
     referenceBuilding, referenceBuildings, skyReferenceRing, skyReferenceTop,
     roadSlantDistanceForHeight, skyPointInApplicableRange,

@@ -214,6 +214,29 @@ def test_north_slant_exclusion_matches(zone):
     assert (len(py_north) == 0) is (zone in ("1mid", "2mid"))
 
 
+def test_height_limits_match_with_three_roads():
+    """令132条の区域区分（3本以上）が JS 版と一致する。
+
+    以前は両方 UndeterminedRegulation で止めていました（食い違い W）。
+    """
+    specs = [{"kind": "road", "road_width_m": 4.5},
+             {"kind": "road", "road_width_m": 6.0},
+             {"kind": "road", "road_width_m": 8.0},
+             {"kind": "adjacent"}]
+    site = _site(specs, far=4.0)
+    _height_parity(site, [(15, 2), (15, 10), (15, 18), (2, 10), (28, 10),
+                          (28, 2), (2, 18), (15, 5)])
+
+
+def test_height_limits_match_with_four_roads():
+    specs = [{"kind": "road", "road_width_m": 4.0},
+             {"kind": "road", "road_width_m": 12.0},
+             {"kind": "road", "road_width_m": 6.0},
+             {"kind": "road", "road_width_m": 8.0}]
+    site = _site(specs, far=6.0, zone="commercial")
+    _height_parity(site, [(15, 2), (15, 10), (15, 18), (2, 10), (28, 10)])
+
+
 def test_height_limits_match_with_rotated_north():
     _height_parity(_site(zone="1low", far=0.8, height=10.0, north=90.0),
                    [(2, 10), (15, 10), (28, 10)])

@@ -77,14 +77,22 @@
 
 ### 前面道路が3本以上のとき
 
-**`UndeterminedRegulation` を返します。** 2項が実際に効くのはこの場合で、
-点ごとにどの道路の集合が「前面道路」になるかが変わります。さらに、集合に
-含まれない道路がその点で斜線を課すのかどうかは条文の文言だけでは決まらず、
-行政庁の運用が分かれます（基本設計書 5.3）。
+**計算します**（2026-08-30）。それまでは `UndeterminedRegulation` で
+止めていました（食い違い W）。2項が実際に効くのはこの場合で、点ごとに
+どの道路の集合が「前面道路」になるかが変わります。
 
-黙って2本用の式で計算するより、判断できないと言うほうが正確です。
-3本以上の敷地を扱う必要が出たら、審査機関プロファイル（原則A）として
-運用を持たせるのが筋です。
+区域の切り方は `road_regions.py` にまとめました。日本建築行政会議の
+新JCBA方式の解説（`docs/mvce/methods/`）で、とくに
+
+- 1項の 2A 区域を生むのは**最大幅員の道路だけ**（狭い道路側からは区分しない）
+- 1項(b) は「その他の**すべての**前面道路の中心線から10m超」
+
+が確認できたため、条文どおりに実装できるようになりました。
+
+集合に含まれない道路は、その点では前面道路ではありません（2項「これらの
+前面道路のみを前面道路とし」・3項「その接する前面道路のみを前面道路と
+する」）。`applied_width_at()` はその場合に実幅員を返し、適用距離の判定で
+制限が外れます。
 
 判定内訳は `RoadSlantDetail` で確認できます。
 """
@@ -104,7 +112,7 @@ ROAD_RELAXATION_KINDS = {
     RelaxationKind.PARK, RelaxationKind.URBAN_PARK, RelaxationKind.WATER,
 }
 
-# 令132条の定数
+# 令132条の定数（令134条2項の判定で使う。区域区分そのものは road_regions.py）
 MULTI_ROAD_WIDTH_FACTOR = 2.0     # 1項(a): 最大幅員の2倍以内
 MULTI_ROAD_MAX_DISTANCE_M = 35.0  # 1項(a)・2項: かつ35m以内
 MULTI_ROAD_CENTERLINE_M = 10.0    # 1項(b): 他の道路の中心線から10m超
@@ -200,44 +208,30 @@ def applied_width_at(site: Site, point: Point, edge: Boundary) -> tuple[float, b
 
     戻り値は (適用幅員, 読み替えが起きたか)。
 
-    前面道路が3本以上ある敷地では `UndeterminedRegulation` を送出します
-    （モジュール冒頭「前面道路が3本以上のとき」参照）。
+    区域の切り方は `road_regions.py` にまとめてあります。**前面道路が3本以上
+    でも計算できます**（2026-08-30。それまでは `UndeterminedRegulation` で
+    止めていました。新JCBA方式の解説で区域の切り方が確認できたため）。
+
+    その点の区域に `edge` が前面道路として含まれていなければ、`edge` は
+    その点では前面道路ではありません（令132条2項「これらの前面道路のみを
+    前面道路とし」・3項「その接する前面道路のみを前面道路とする」）。
+    その場合は幅員をそのまま返し、`detail_at()` 側で適用距離により
+    制限が外れます。
     """
-    roads = site.road_edges
-    max_width = site.max_road_width_m
+    from .road_regions import region_at_point
 
-    if len(roads) >= 3:
-        raise UndeterminedRegulation(
-            f"前面道路が{len(roads)}本あります。令132条2項は、1項の区域外で"
-            f"2以上の道路の2倍かつ35m以内に入る区域について「これらの前面道路"
-            f"のみを前面道路とする」と定めますが、その集合に入らない道路が"
-            f"その点で斜線を課すかどうかは条文からは決まらず、行政庁の運用が"
-            f"分かれます。2本用の式で近似すると誤った結果になるため計算を"
-            f"止めます（基本設計書 5.3）"
-        )
-
-    if len(roads) < 2 or edge.road_width_m >= max_width:
-        # 1本だけ、または自分が最大幅員。読み替えの余地なし。
+    region = region_at_point(site, point)
+    if region is None:
         return edge.road_width_m, False
 
-    widest = max(roads, key=lambda e: e.road_width_m)
+    edge_index = next(
+        (i for i, e in enumerate(site.edges) if e is edge), None)
+    if edge_index is None or edge_index not in region.road_indices:
+        # その点ではこの道路は前面道路ではない
+        return edge.road_width_m, False
 
-    # 1項(a) 最大幅員道路の境界線から 2A 以内 かつ 35m 以内
-    d_widest = point_line_distance(point, widest.p1, widest.p2)
-    in_a = (d_widest <= MULTI_ROAD_WIDTH_FACTOR * max_width + 1e-9
-            and d_widest <= MULTI_ROAD_MAX_DISTANCE_M + 1e-9)
-
-    # 1項(b) その他の前面道路の中心線から 10m を超える。
-    #        道路が2本なら「その他」は edge だけ。
-    #        中心線は道路境界線から幅員の半分だけ敷地の外側にある。
-    d_centerline = point_line_distance(point, edge.p1, edge.p2) + edge.road_width_m / 2.0
-    in_b = d_centerline > MULTI_ROAD_CENTERLINE_M + 1e-9
-
-    if in_a or in_b:
-        return max_width, True
-
-    # 2項の区域は2本のとき空（モジュール冒頭参照）。よって3項。
-    return edge.road_width_m, False
+    widened = region.deemed_width_m > edge.road_width_m + 1e-9
+    return region.deemed_width_m, widened
 
 
 def detail_at(site: Site, point: Point, edge_index: int) -> RoadSlantDetail:
