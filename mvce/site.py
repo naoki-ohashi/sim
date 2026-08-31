@@ -377,16 +377,22 @@ class Site:
     def max_building_area_m2(self) -> float:
         """建蔽率による建築面積の上限。
 
-        敷地が用途地域の2以上にわたるときは法53条2項で面積按分します。
+        法53条6項1号の適用除外に当たる場合は敷地面積そのもの（＝制限なし）を
+        返します。またがりは法53条2項で面積按分します。
         """
-        return self.area_m2 * self.coverage_ratio_limit()
+        limit = self.coverage_ratio_limit()
+        return self.area_m2 if limit is None else self.area_m2 * limit
 
-    def coverage_ratio_limit(self) -> float:
-        """適用される建蔽率（法53条1項、またがりは法53条2項）。"""
+    def coverage_ratio_limit(self) -> float | None:
+        """適用される建蔽率。`None` は制限なし（法53条6項1号）。
+
+        法53条1項の数値に3項の加算（防火・角地）を当ててから、またがりが
+        あれば2項で按分します。**加算が先、按分が後**です。
+        """
         from .zone_split import weighted_coverage_limit
 
         if self.zone_split is None:
-            return self.zoning.coverage_ratio
+            return self.zoning.coverage_limit()
         return weighted_coverage_limit(self.zone_split)[0]
 
     def max_total_floor_area_m2(self) -> float:

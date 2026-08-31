@@ -190,25 +190,49 @@ def weighted_far_limit(split: ZoneSplit, road_width_m: float) -> tuple[float, li
 
 # === 法53条2項（建蔽率の按分）========================================
 
-def weighted_coverage_limit(split: ZoneSplit) -> tuple[float, list[str]]:
-    """法53条2項の按分後の建蔽率。`(限度, 説明)` を返す。"""
+def weighted_coverage_limit(split: ZoneSplit) -> tuple[float | None, list[str]]:
+    """法53条2項の按分後の建蔽率。`(限度, 説明)` を返す。
+
+    限度が `None` なら**制限なし**（法53条6項1号の適用除外）です。
+
+    **3項の加算は按分より先です。** 3項は「前二項の規定の適用については…
+    第一項各号に定める数値に十分の一を加えたものをもつて当該各号に定める
+    数値とし」なので、1項の数値を読み替えてから2項で按分します。順番を
+    逆にすると答えが変わります。
+
+    区域のどれかが6項1号の適用除外に当たる場合は、条文が「前各項の規定は
+    （略）適用しない」としているので、按分せず制限なしとします。
+    """
     total = split.total_area_m2
     notes: list[str] = []
+
+    limits = [p.zoning.coverage_limit() for p in split.parts]
+    if any(limit is None for limit in limits):
+        exempt = [p.label or p.zoning.zone_type
+                  for p, limit in zip(split.parts, limits) if limit is None]
+        notes.append(
+            f"法53条6項1号: {('・'.join(exempt))} が建蔽率の適用除外"
+            "（建蔽率の限度が8/10とされている地域の防火地域内の耐火建築物等）"
+            "に当たるため、建蔽率の制限はありません。"
+        )
+        return None, notes
+
     if split.is_single:
-        return split.parts[0].zoning.coverage_ratio, notes
+        return limits[0], notes
 
     notes.append(
         f"法53条2項: 敷地が建蔽率の制限の異なる{len(split.parts)}区域に"
         "わたるため、各区域の限度を面積割合で按分します。"
     )
     value = 0.0
-    for part in split.parts:
-        limit = part.zoning.coverage_ratio
+    for part, limit in zip(split.parts, limits):
         fraction = part.area_m2 / total
         value += limit * fraction
         label = part.label or part.zoning.zone_type
+        bonus = limit - part.zoning.coverage_ratio
+        tail = f"（法53条3項で +{bonus * 100:.0f}%）" if bonus > 1e-9 else ""
         notes.append(
-            f"  {label}: 限度 {limit * 100:.0f}% × 面積割合 {fraction * 100:.1f}%"
+            f"  {label}: 限度 {limit * 100:.0f}%{tail} × 面積割合 {fraction * 100:.1f}%"
             f" = {limit * fraction * 100:.1f}%"
         )
     notes.append(f"  合計 = {value * 100:.1f}%")

@@ -328,6 +328,151 @@ def adjacent_slant_setback_applies(zone_type: str, designated_2_5: bool = False)
     return adjacent_slant_item(zone_type) != "ro" 
 
 
+# --- 建蔽率の緩和・適用除外（法53条3項・6項・7項・8項）----------------
+#
+# 1項の数値は都市計画で決まる入力（`ZoningParams.coverage_ratio`）です。
+# ここで扱うのは、そこに加算する / 制限を外す規定です。
+#
+#   3項 … 1号（防火地域＋耐火建築物等 / 準防火地域＋耐火・準耐火建築物等）
+#          または 2号（角地等の指定）で **+1/10**、両方で **+2/10**
+#   6項1号 … 建蔽率の限度が8/10とされている地域の防火地域内の耐火建築物等は
+#          **制限そのものが適用されない**
+#   7項 … 敷地が防火地域の内外にわたり、建築物の全部が耐火建築物等なら
+#          全て防火地域内とみなす
+#   8項 … 敷地が準防火地域と（防火・準防火以外）にわたり、建築物の全部が
+#          耐火建築物等または準耐火建築物等なら全て準防火地域内とみなす
+#
+# 3項は「**前二項の規定の適用については**」なので、加算は1項の数値に対して
+# 行い、**そのうえで2項の按分**をします。順番を逆にすると答えが変わります。
+
+#: 防火地域等の指定。7項・8項のみなしを表現するため、またがりも値に持ちます。
+FIRE_ZONES = (
+    "none",                # 防火地域でも準防火地域でもない
+    "fire",                # 防火地域
+    "quasi_fire",          # 準防火地域
+    "fire_partial",        # 防火地域の内外にわたる（法53条7項）
+    "quasi_fire_partial",  # 準防火地域と防火・準防火以外にわたる（法53条8項）
+)
+
+#: 建築物の防火性能。法53条3項1号のイ・ロ。
+FIREPROOF_GRADES = (
+    "none",
+    "quasi_fireproof",  # ロ: 準耐火建築物等
+    "fireproof",        # イ: 耐火建築物等
+)
+
+#: 法53条3項の加算（1つ該当で 1/10、2つで 2/10）
+COVERAGE_BONUS_PER_ITEM = 0.1
+
+#: 法53条1項2号〜4号の地域（3項1号・6項1号の「8/10とされている地域」の母集団）
+COVERAGE_ITEM_2_TO_4_ZONES = frozenset({
+    # 二号
+    "1res", "2res", "quasi_res", "quasi_industrial",
+    # 三号
+    "neighbor_commercial",
+    # 四号
+    "commercial",
+})
+
+#: 「建蔽率の限度が十分の八とされている」の判定値
+COVERAGE_EIGHT_TENTHS = 0.8
+
+
+def effective_fire_zone(fire_zone: str, fireproof: str) -> str:
+    """法53条7項・8項のみなしを適用したあとの防火地域等。
+
+        ７　建築物の敷地が防火地域の内外にわたる場合において、その敷地内の
+        建築物の全部が耐火建築物等であるときは、その敷地は、全て防火地域内に
+        あるものとみなして、第三項第一号又は前項第一号の規定を適用する。
+
+        ８　建築物の敷地が準防火地域と防火地域及び準防火地域以外の区域とに
+        わたる場合において、その敷地内の建築物の全部が耐火建築物等又は
+        準耐火建築物等であるときは、その敷地は、全て準防火地域内にあるものと
+        みなして、第三項第一号の規定を適用する。
+
+    みなしの条件を満たさなければ、またがりのままでは3項1号・6項1号の
+    「（準）防火地域内にある」に当たらないので `none` として扱います。
+    """
+    if fire_zone not in FIRE_ZONES:
+        raise ValueError(f"fire_zone は {FIRE_ZONES} のいずれかです（指定値: {fire_zone!r}）")
+    if fireproof not in FIREPROOF_GRADES:
+        raise ValueError(
+            f"fireproof は {FIREPROOF_GRADES} のいずれかです（指定値: {fireproof!r}）")
+
+    if fire_zone == "fire_partial":
+        return "fire" if fireproof == "fireproof" else "none"
+    if fire_zone == "quasi_fire_partial":
+        return "quasi_fire" if fireproof in ("fireproof", "quasi_fireproof") else "none"
+    return fire_zone
+
+
+def _is_eight_tenths_zone(zone_type: str, coverage_ratio: float) -> bool:
+    """法53条1項2号〜4号により建蔽率の限度が 8/10 とされている地域か。"""
+    return (zone_type in COVERAGE_ITEM_2_TO_4_ZONES
+            and abs(coverage_ratio - COVERAGE_EIGHT_TENTHS) < 1e-9)
+
+
+def coverage_fire_bonus_applies(
+    zone_type: str, coverage_ratio: float, fire_zone: str, fireproof: str
+) -> bool:
+    """法53条3項1号に当たるか。
+
+        一　防火地域（第一項第二号から第四号までの規定により建蔽率の限度が
+        十分の八とされている地域を除く。）内にあるイに該当する建築物
+        又は準防火地域内にあるイ若しくはロのいずれかに該当する建築物
+
+    イ＝耐火建築物等、ロ＝準耐火建築物等。**準防火地域では準耐火建築物等でも
+    対象**です（旧法にはありませんでした）。
+    """
+    effective = effective_fire_zone(fire_zone, fireproof)
+    if effective == "fire":
+        if _is_eight_tenths_zone(zone_type, coverage_ratio):
+            return False        # 6項1号の側（適用除外）
+        return fireproof == "fireproof"
+    if effective == "quasi_fire":
+        return fireproof in ("fireproof", "quasi_fireproof")
+    return False
+
+
+def coverage_is_exempt(
+    zone_type: str, coverage_ratio: float, fire_zone: str, fireproof: str
+) -> bool:
+    """法53条6項1号に当たるか（建蔽率の制限そのものが適用されない）。
+
+        一　防火地域（第一項第二号から第四号までの規定により建蔽率の限度が
+        十分の八とされている地域に限る。）内にある耐火建築物等
+    """
+    if not _is_eight_tenths_zone(zone_type, coverage_ratio):
+        return False
+    return (effective_fire_zone(fire_zone, fireproof) == "fire"
+            and fireproof == "fireproof")
+
+
+def coverage_limit(
+    zone_type: str,
+    coverage_ratio: float,
+    fire_zone: str = "none",
+    fireproof: str = "none",
+    corner_lot_designated: bool = False,
+) -> float | None:
+    """法53条1項・3項・6項1号による建蔽率の限度。
+
+    `None` は**制限なし**（6項1号の適用除外）です。0 ではありません。
+
+    2項の按分は呼び出し側（`zone_split`）が、この関数で区域ごとの値を
+    出してから行います。3項が「前二項の規定の適用については」＝1項の数値を
+    読み替える規定なので、**加算が先、按分が後**です。
+    """
+    if coverage_is_exempt(zone_type, coverage_ratio, fire_zone, fireproof):
+        return None
+    bonus = 0.0
+    if coverage_fire_bonus_applies(zone_type, coverage_ratio, fire_zone, fireproof):
+        bonus += COVERAGE_BONUS_PER_ITEM
+    if corner_lot_designated:
+        bonus += COVERAGE_BONUS_PER_ITEM
+    return min(1.0, coverage_ratio + bonus)
+
+
 # --- 北側斜線（法56条1項3号）----------------------------------------
 #
 #   三　第一種低層住居専用地域、第二種低層住居専用地域若しくは田園住居地域内
@@ -540,6 +685,19 @@ class ZoningParams:
     #: 無指定区域ではこれを与えないと隣地斜線が計算できません。
     unspecified_adjacent_slant_slope: float | None = None
 
+    #: 防火地域等の指定（法53条3項1号・6項1号）。`FIRE_ZONES` の値。
+    #: 敷地がまたがる場合は `fire_partial` / `quasi_fire_partial` を使うと、
+    #: 法53条7項・8項のみなしを engine 側で当てはめます。
+    fire_zone: str = "none"
+
+    #: 建築物の防火性能（法53条3項1号のイ・ロ）。`FIREPROOF_GRADES` の値。
+    #: **建築物の属性**なので本来は用途地域の情報ではありませんが、建蔽率の
+    #: 限度を出すのに要るのでここに置いています。
+    fireproof: str = "none"
+
+    #: 法53条3項2号。街区の角にある敷地等で特定行政庁が指定するもの。
+    corner_lot_designated: bool = False
+
     #: 法56条の2第1項の条例で、別表第四 二の項の（一）〜（三）号が指定された
     #: 区域にあるか。**中高層住専で True なら北側斜線が適用されません**
     #: （法56条1項3号の括弧書き。天空率の北側算定位置も無くなります）。
@@ -575,6 +733,13 @@ class ZoningParams:
                 "unspecified_adjacent_slant_slope は 1.25 か 2.5 です"
                 f"（指定値: {self.unspecified_adjacent_slant_slope}）"
             )
+        if self.fire_zone not in FIRE_ZONES:
+            raise ValueError(
+                f"fire_zone は {FIRE_ZONES} のいずれかです（指定値: {self.fire_zone!r}）")
+        if self.fireproof not in FIREPROOF_GRADES:
+            raise ValueError(
+                f"fireproof は {FIREPROOF_GRADES} のいずれかです"
+                f"（指定値: {self.fireproof!r}）")
         if self.zone_type in LOW_RISE_ZONES:
             # 法55条1項:
             #   第一種低層住居専用地域、第二種低層住居専用地域又は田園住居地域
@@ -604,6 +769,15 @@ class ZoningParams:
     @property
     def label_ja(self) -> str:
         return ZONE_LABELS_JA[self.zone_type]
+
+    def coverage_limit(self) -> float | None:
+        """法53条1項・3項・6項1号によるこの区域の建蔽率の限度。
+
+        `None` は制限なし（6項1号の適用除外）です。
+        """
+        return coverage_limit(
+            self.zone_type, self.coverage_ratio,
+            self.fire_zone, self.fireproof, self.corner_lot_designated)
 
     @property
     def group(self) -> str:
