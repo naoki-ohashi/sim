@@ -284,13 +284,40 @@ def adjacent_slant_params(
 
 
 # --- 北側斜線（法56条1項3号）----------------------------------------
+#
+#   三　第一種低層住居専用地域、第二種低層住居専用地域若しくは田園住居地域内
+#   又は第一種中高層住居専用地域若しくは第二種中高層住居専用地域（**次条
+#   第一項の規定に基づく条例で別表第四の二の項に規定する（一）、（二）又は
+#   （三）の号が指定されているものを除く。以下この号及び第七項第三号に
+#   おいて同じ。**）内においては、（略）
+#
+# **中高層住専に日影規制の指定があれば、北側斜線はかかりません。**
+# 括弧書きが付いているのは中高層住専だけで、低層住専・田園住居には
+# 付いていません（「又は」の前に列挙されている）。
+#
+# 「第七項第三号において同じ」なので、**天空率の北側の算定位置も無くなります**
+# （`regulations/sky_positions.py`）。
 NORTH_SLANT_ZONES: dict[str, tuple[float, float]] = {
     "1low": (5.0, 1.25), "2low": (5.0, 1.25), "denen": (5.0, 1.25),
     "1mid": (10.0, 1.25), "2mid": (10.0, 1.25),
 }
 
+#: 法56条1項3号の括弧書きで除かれうる用途地域（中高層住専のみ）
+NORTH_SLANT_EXCLUDABLE_ZONES = frozenset({"1mid", "2mid"})
 
-def north_slant_params(zone_type: str) -> tuple[float, float] | None:
+
+def north_slant_params(
+    zone_type: str, shadow_designated: bool = False
+) -> tuple[float, float] | None:
+    """(立上り高さ, 勾配)。北側斜線の適用が無い用途地域は None。
+
+    `shadow_designated` は、その敷地が法56条の2第1項の条例で別表第四
+    二の項の（一）〜（三）号が指定された区域にあるか。**中高層住専で
+    True なら北側斜線は適用されません**（法56条1項3号の括弧書き）。
+    低層住専・田園住居には括弧書きが無いので影響しません。
+    """
+    if shadow_designated and zone_type in NORTH_SLANT_EXCLUDABLE_ZONES:
+        return None
     return NORTH_SLANT_ZONES.get(zone_type)
 
 
@@ -467,6 +494,12 @@ class ZoningParams:
     #: 「一・二五又は二・五のうち特定行政庁が定めるもの」なので、
     #: 無指定区域ではこれを与えないと隣地斜線が計算できません。
     unspecified_adjacent_slant_slope: float | None = None
+
+    #: 法56条の2第1項の条例で、別表第四 二の項の（一）〜（三）号が指定された
+    #: 区域にあるか。**中高層住専で True なら北側斜線が適用されません**
+    #: （法56条1項3号の括弧書き。天空率の北側算定位置も無くなります）。
+    #: 既定 False は北側斜線を適用する側で、保守側です。
+    shadow_ordinance_designated: bool = False
 
     #: 法56条1項2号イのただし書。特定行政庁が指定する区域では、イの
     #: 1.25 が 2.5 になります（立上りも 20m → 31m）。中高層住専で容積率の

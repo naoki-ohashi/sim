@@ -279,7 +279,15 @@
     '1low': [5.0, 1.25], '2low': [5.0, 1.25], denen: [5.0, 1.25],
     '1mid': [10.0, 1.25], '2mid': [10.0, 1.25],
   };
-  const northSlantParams = z => NORTH_SLANT[z] || null;
+  // 法56条1項3号の括弧書きで除かれうるのは中高層住専だけ。
+  // 「以下この号及び第七項第三号において同じ」なので天空率の北側算定位置も消える。
+  const NORTH_SLANT_EXCLUDABLE = new Set(['1mid', '2mid']);
+  function northSlantParams(z, shadowDesignated) {
+    if (shadowDesignated && NORTH_SLANT_EXCLUDABLE.has(z)) return null;
+    return NORTH_SLANT[z] || null;
+  }
+  const siteNorthSlantParams = site =>
+    northSlantParams(site.zoning.zoneType, site.zoning.shadowOrdinanceDesignated);
 
   const FAR_ROAD_COEFFICIENT = { residential: 0.4, other: 0.6 };
   const FAR_ROAD_WIDTH_THRESHOLD_M = 12.0;
@@ -514,7 +522,7 @@
   }
 
   function northHeightLimit(site, point) {
-    const params = northSlantParams(site.zoning.zoneType);
+    const params = siteNorthSlantParams(site);
     if (!params) return Infinity;
     const [start, slope] = params;
     const nv = northVector(site.northAngleDeg);
@@ -603,7 +611,7 @@
 
   // 北側斜線: 高さ height_m を確保するために必要な、真北方向の距離（後退緩和は無い）
   function northRequiredSetback(site, edgeIndex, heightM) {
-    const params = northSlantParams(site.zoning.zoneType);
+    const params = siteNorthSlantParams(site);
     if (!params || heightM <= 0) return 0;
     const edge = site.edges[edgeIndex];
     const [start, slope] = params;
@@ -712,7 +720,7 @@
       return !!adjacentSlantParams(site.zoning.zoneType, site.zoning.farRatio,
         site.zoning.unspecifiedAdjacentSlantSlope, site.zoning.adjacentSlant25Designated);
     }
-    return !!northSlantParams(site.zoning.zoneType);
+    return !!siteNorthSlantParams(site);
   }
 
   function skyReferenceRing(site, heightM, kind) {
@@ -919,8 +927,9 @@
       });
     }
 
-    // 北側（令135条の11）
-    const northBase = NORTH_BASELINE_M[z.zoneType];
+    // 北側（令135条の11）。法56条1項3号の括弧書きは「第七項第三号において
+    // 同じ」なので、中高層住専で日影規制の指定があれば算定位置も無い。
+    const northBase = siteNorthSlantParams(site) ? NORTH_BASELINE_M[z.zoneType] : null;
     if (northBase != null) {
       const interval = capInterval(NORTH_POINT_INTERVAL_M[z.zoneType], maxIntervalM);
       for (const idx of northEdgeIndices(site)) {

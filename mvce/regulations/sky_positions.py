@@ -235,12 +235,20 @@ def adjacent_positions(site: Site,
 # === 北側（令135条の11）===============================================
 
 def north_baseline_distance_m(site: Site) -> float | None:
-    """法56条7項3号の基準線までの真北方向の水平距離。"""
+    """法56条7項3号の基準線までの真北方向の水平距離。
+
+    法56条1項3号の括弧書きは「以下この号**及び第七項第三号**において同じ」
+    なので、中高層住専で日影規制の指定があれば北側の算定位置もありません。
+    """
+    if not north_slant.applies(site):
+        return None
     return NORTH_BASELINE_M.get(site.zoning.zone_type)
 
 
 def north_interval_m(site: Site) -> float | None:
     """令135条の11第1項2号の間隔の上限。"""
+    if not north_slant.applies(site):
+        return None
     return NORTH_INTERVAL_M.get(site.zoning.zone_type)
 
 

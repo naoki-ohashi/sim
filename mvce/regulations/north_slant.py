@@ -42,8 +42,18 @@ def _level_relaxation(edge: Boundary) -> float:
     return (h - 1.0) / 2.0 if h >= 1.0 else 0.0
 
 
+def _params(site: Site):
+    """その敷地の (立上り高さ, 勾配)。適用が無ければ None。
+
+    法56条1項3号の括弧書き（中高層住専で日影規制の指定があれば適用外）を
+    含みます。
+    """
+    return north_slant_params(
+        site.zoning.zone_type, site.zoning.shadow_ordinance_designated)
+
+
 def applies(site: Site) -> bool:
-    return north_slant_params(site.zoning.zone_type) is not None
+    return _params(site) is not None
 
 
 def north_edges(site: Site) -> list[int]:
@@ -75,7 +85,7 @@ def _north_distance(site: Site, edge: Boundary, point: Point) -> float:
 
 
 def edge_height_limit(site: Site, edge_index: int, point: Point) -> float:
-    params = north_slant_params(site.zoning.zone_type)
+    params = _params(site)
     if params is None:
         return math.inf
     start_height, slope = params
@@ -98,7 +108,7 @@ def height_limit_at(site: Site, point: Point) -> float:
 
 def required_setback_for_height(site: Site, edge_index: int, height_m: float) -> float:
     """高さ `height_m` を確保するために必要な、北側境界線からの真北方向の距離。"""
-    params = north_slant_params(site.zoning.zone_type)
+    params = _params(site)
     if params is None or height_m <= 0:
         return 0.0
     edge = site.edges[edge_index]

@@ -66,6 +66,8 @@ def _build_zoning(data: dict) -> ZoningParams:
         unspecified_shadow_row=data.get("unspecified_shadow_row"),
         unspecified_adjacent_slant_slope=data.get("unspecified_adjacent_slant_slope"),
         adjacent_slant_2_5_designated=data.get("adjacent_slant_2_5_designated", False),
+        # 法56条1項3号の括弧書き。中高層住専で日影規制の指定があれば北側斜線は無い
+        shadow_ordinance_designated=data.get("shadow_ordinance_designated", False),
     )
 
 

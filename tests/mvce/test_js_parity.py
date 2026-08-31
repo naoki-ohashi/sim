@@ -39,7 +39,7 @@ SQUARE = [(0.0, 0.0), (30.0, 0.0), (30.0, 20.0), (0.0, 20.0)]
 
 
 def _site(specs=None, zone="1res", far=2.0, coverage=0.6, north=0.0, setback=0.0,
-          height=None):
+          height=None, shadow_designated=False):
     if specs is None:
         specs = [
             {"kind": "road", "road_width_m": 6.0, "wall_setback_m": setback},
@@ -49,7 +49,8 @@ def _site(specs=None, zone="1res", far=2.0, coverage=0.6, north=0.0, setback=0.0
         ]
     return Site.from_rings(
         SQUARE, specs,
-        ZoningParams(zone, far, coverage, absolute_height_limit_m=height),
+        ZoningParams(zone, far, coverage, absolute_height_limit_m=height,
+                     shadow_ordinance_designated=shadow_designated),
         north=NorthReference(north_angle_deg=north))
 
 
@@ -74,6 +75,7 @@ def _js_site(site):
             "unspecifiedRoadSlantSlope": site.zoning.unspecified_road_slant_slope,
             "unspecifiedAdjacentSlantSlope": site.zoning.unspecified_adjacent_slant_slope,
             "adjacentSlant25Designated": site.zoning.adjacent_slant_2_5_designated,
+            "shadowOrdinanceDesignated": site.zoning.shadow_ordinance_designated,
         },
         "northAngleDeg": site.north.north_angle_deg,
         "floorHeightM": site.floor_height_m,
@@ -192,6 +194,24 @@ def test_height_limits_match_for_north_slant_zones():
                               ("2mid", 3.0, None)):
         _height_parity(_site(zone=zone, far=far, height=height),
                        [(15, 19), (15, 10), (15, 2)])
+
+
+@pytest.mark.parametrize("zone", ["1mid", "2mid", "1low"])
+def test_north_slant_exclusion_matches(zone):
+    """法56条1項3号の括弧書き。中高層住専だけ、日影規制の指定で北側斜線が消える。
+
+    低層住専には括弧書きが無いので指定があっても消えません。天空率の
+    北側算定位置も同じ扱い（「第七項第三号において同じ」）。
+    """
+    height = 10.0 if zone == "1low" else None
+    far = 0.8 if zone == "1low" else 2.0
+    site = _site(zone=zone, far=far, height=height, shadow_designated=True)
+    _height_parity(site, [(15, 19), (15, 10), (15, 2)])
+    js = _run_js({"want": ["sky"], "site": _js_site(site)})["sky"]
+    js_north = [p for p in js["measurementPoints"] if p["kind"] == "north"]
+    py_north = [p for p in measurement_points(site) if p.kind == "north"]
+    assert len(js_north) == len(py_north)
+    assert (len(py_north) == 0) is (zone in ("1mid", "2mid"))
 
 
 def test_height_limits_match_with_rotated_north():

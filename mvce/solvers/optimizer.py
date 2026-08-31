@@ -224,6 +224,34 @@ class OptimizeResult:
         return lines
 
 
+def _north_slant_exclusion_note(site) -> list[str]:
+    """法56条1項3号の括弧書きの取りこぼしを知らせる。
+
+    日影規制を計算するということは、その敷地が法56条の2第1項の条例で
+    指定された対象区域内にあるはずです。中高層住専なら北側斜線は
+    かからないのに、`shadow_ordinance_designated` を指定していないと
+    北側斜線を効かせたままになります。**厳しい側なので危険では
+    ありませんが、延床が小さく出ます。**
+
+    黙って外すと、対象区域外の中高層住専で日影を試算しただけの人にまで
+    北側斜線が消えてしまうので、注記にとどめます。
+    """
+    from ..zoning import NORTH_SLANT_EXCLUDABLE_ZONES
+
+    if site.zoning.zone_type not in NORTH_SLANT_EXCLUDABLE_ZONES:
+        return []
+    if site.zoning.shadow_ordinance_designated:
+        return []
+    return [
+        "日影規制を計算していますが、`shadow_ordinance_designated` が"
+        "指定されていないため北側斜線を適用しています。法56条1項3号の"
+        "括弧書きにより、**中高層住専で別表第四 二の項の号が条例で指定された"
+        "区域では北側斜線はかかりません**。対象区域内であれば"
+        "`shadow_ordinance_designated: true` を指定してください"
+        "（いまの結果は厳しい側です）。",
+    ]
+
+
 def _ground_plane_notes(site, weighted: bool = True) -> list[str]:
     """令2条2項の地盤面についての注記。
 
@@ -577,6 +605,7 @@ def optimize(
         from ..regulations.shadow import deemed_average_ground_level_m
 
         notes.extend(deemed_average_ground_level_m(site)[1])
+        notes.extend(_north_slant_exclusion_note(site))
 
     area = build_mesh(
         site,

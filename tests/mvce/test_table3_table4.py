@@ -487,3 +487,104 @@ def test_the_refusal_names_both_routes_to_12m():
     with pytest.raises(UndeterminedRegulation) as e:
         ZoningParams(zone_type="1low", far_ratio=0.8, coverage_ratio=0.5)
     assert "法55条2項" in str(e.value)
+
+
+# === 法56条1項3号の括弧書き（食い違い H）==============================
+#
+#   三　第一種低層住居専用地域、第二種低層住居専用地域若しくは田園住居地域内
+#   又は第一種中高層住居専用地域若しくは第二種中高層住居専用地域（**次条
+#   第一項の規定に基づく条例で別表第四の二の項に規定する（一）、（二）又は
+#   （三）の号が指定されているものを除く。以下この号及び第七項第三号に
+#   おいて同じ。**）内においては、（略）
+#
+# 括弧書きが付いているのは中高層住専だけ。低層住専・田園住居は「又は」の
+# 前に列挙されていて、括弧書きの外です。
+
+@pytest.mark.parametrize("zone", ["1mid", "2mid"])
+def test_shadow_designation_removes_the_north_slant_in_mid_rise(zone):
+    from mvce.zoning import north_slant_params
+
+    assert north_slant_params(zone) == (10.0, 1.25)
+    assert north_slant_params(zone, shadow_designated=True) is None
+
+
+@pytest.mark.parametrize("zone", ["1low", "2low", "denen"])
+def test_low_rise_keeps_the_north_slant_even_when_designated(zone):
+    """低層住専・田園住居には括弧書きが無い。"""
+    from mvce.zoning import north_slant_params
+
+    assert north_slant_params(zone, shadow_designated=True) == (5.0, 1.25)
+
+
+def test_the_exclusion_only_covers_mid_rise():
+    from mvce.zoning import NORTH_SLANT_EXCLUDABLE_ZONES
+
+    assert NORTH_SLANT_EXCLUDABLE_ZONES == frozenset({"1mid", "2mid"})
+
+
+def test_north_slant_applies_follows_the_designation():
+    from mvce.regulations import north_slant
+
+    square = [(0.0, 0.0), (30.0, 0.0), (30.0, 20.0), (0.0, 20.0)]
+    specs = [{"kind": "road", "road_width_m": 6.0}, {"kind": "adjacent"},
+             {"kind": "adjacent"}, {"kind": "adjacent"}]
+    for designated, expected in ((False, True), (True, False)):
+        site = Site.from_rings(
+            square, specs,
+            ZoningParams("1mid", 2.0, 0.6, shadow_ordinance_designated=designated))
+        assert north_slant.applies(site) is expected
+
+
+def test_the_exclusion_also_removes_the_sky_ratio_north_positions():
+    """「以下この号及び**第七項第三号**において同じ」なので算定位置も消える。"""
+    from mvce.regulations.sky_positions import north_positions
+
+    square = [(0.0, 0.0), (30.0, 0.0), (30.0, 20.0), (0.0, 20.0)]
+    specs = [{"kind": "road", "road_width_m": 6.0}, {"kind": "adjacent"},
+             {"kind": "adjacent"}, {"kind": "adjacent"}]
+    plain = Site.from_rings(square, specs, ZoningParams("1mid", 2.0, 0.6))
+    designated = Site.from_rings(
+        square, specs, ZoningParams("1mid", 2.0, 0.6, shadow_ordinance_designated=True))
+    assert north_positions(plain)
+    assert north_positions(designated) == []
+
+
+def test_the_designation_actually_frees_height():
+    """北側斜線が外れるぶん、北寄りが高く取れる。"""
+    from mvce.regulations.height_field import height_limit_at
+
+    square = [(0.0, 0.0), (30.0, 0.0), (30.0, 20.0), (0.0, 20.0)]
+    specs = [{"kind": "road", "road_width_m": 6.0}, {"kind": "adjacent"},
+             {"kind": "adjacent"}, {"kind": "adjacent"}]
+    plain = Site.from_rings(square, specs, ZoningParams("1mid", 4.0, 0.6))
+    designated = Site.from_rings(
+        square, specs, ZoningParams("1mid", 4.0, 0.6, shadow_ordinance_designated=True))
+    point = (15.0, 18.0)          # 北辺のすぐ手前
+    assert height_limit_at(designated, point) > height_limit_at(plain, point)
+
+
+def test_the_optimizer_warns_when_the_designation_is_missing():
+    """日影を計算しているのに指定が無ければ、厳しい側のままだと知らせる。"""
+    from mvce.regulations.shadow import ShadowRegulationSpec
+    from mvce.solvers.optimizer import OptimizeOptions, optimize
+
+    square = [(0.0, 0.0), (30.0, 0.0), (30.0, 20.0), (0.0, 20.0)]
+    specs = [{"kind": "road", "road_width_m": 6.0}, {"kind": "adjacent"},
+             {"kind": "adjacent"}, {"kind": "adjacent"}]
+    spec = ShadowRegulationSpec(measurement_height_m=4.0, line_5m_max_hours=5.0,
+                                line_10m_max_hours=3.0, time_step_minutes=30.0,
+                                sample_interval_m=6.0)
+    options = OptimizeOptions(cell_size_x_m=10.0, cell_size_y_m=10.0)
+
+    plain = Site.from_rings(square, specs, ZoningParams("1mid", 2.0, 0.6))
+    assert any("法56条1項3号" in n for n in optimize(plain, spec, options).notes)
+
+    designated = Site.from_rings(
+        square, specs, ZoningParams("1mid", 2.0, 0.6, shadow_ordinance_designated=True))
+    assert not any("法56条1項3号" in n for n in optimize(designated, spec, options).notes)
+
+    # 低層住専は括弧書きの外なので注記は出ない
+    low = Site.from_rings(
+        square, specs,
+        ZoningParams("1low", 0.8, 0.5, absolute_height_limit_m=10.0))
+    assert not any("法56条1項3号" in n for n in optimize(low, spec, options).notes)
