@@ -1,70 +1,71 @@
 @echo off
+chcp 932 >nul 2>&1
 REM ===================================================================
-REM  jwcad-volume : Windows用exeビルドスクリプト
+REM  jwcad-volume : Windows�pexe�r���h�X�N���v�g
 REM
-REM  Windows上で、Pythonがインストールされた状態で実行してください。
-REM  出来上がったexeはPython無しのPCでも動きます。
+REM  Windows��ŁAPython���C���X�g�[�����ꂽ��ԂŎ��s���Ă��������B
+REM  �o���オ����exe��Python������PC�ł������܂��B
 REM
-REM    実行方法: このファイルをダブルクリック、または
-REM              コマンドプロンプトで  build_windows.bat
+REM    ���s���@: ���̃t�@�C�����_�u���N���b�N�A�܂���
+REM              �R�}���h�v�����v�g��  build_windows.bat
 REM
-REM  出来上がるもの (dist\jww\ フォルダ):
-REM    jwcad_volume_gaihen.exe … JWW外部変形の本体
-REM    jwcad-volume.exe         … 単体で使うコマンド版
-REM    最大ボリューム計算.bat    … JWWの外部変形メニューに登録するバッチ
-REM    診断_データ確認.bat       … 書式確認用（図面は変更しません）
-REM    gaihen_params.yaml       … 用途地域や容積率などの設定ファイル
+REM  �o���オ����� (dist\jww\ �t�H���_):
+REM    jwcad_volume_gaihen.exe �c JWW�O���ό`�̖{��
+REM    jwcad-volume.exe         �c �P�̂Ŏg���R�}���h��
+REM    �ő�{�����[���v�Z.bat    �c JWW�̊O���ό`���j���[�ɓo�^����o�b�`
+REM    �f�f_�f�[�^�m�F.bat       �c �����m�F�p�i�}�ʂ͕ύX���܂���j
+REM    gaihen_params.yaml       �c �p�r�n���e�ϗ��Ȃǂ̐ݒ�t�@�C��
 REM
-REM  ※ このスクリプトはLinux環境で開発したため、Windows実機での
-REM     ビルド検証はできていません。エラーが出た場合はメッセージを
-REM     添えて報告してください。
+REM  �� ���̃X�N���v�g��Linux���ŊJ���������߁AWindows���@�ł�
+REM     �r���h���؂͂ł��Ă��܂���B�G���[���o���ꍇ�̓��b�Z�[�W��
+REM     �Y���ĕ񍐂��Ă��������B
 REM ===================================================================
 setlocal
 
-echo [1/4] 依存パッケージとPyInstallerを導入します...
+echo [1/4] �ˑ��p�b�P�[�W��PyInstaller�𓱓����܂�...
 python -m pip install --upgrade pip
 python -m pip install -e .
 python -m pip install pyinstaller
 if errorlevel 1 goto :failed
 
 echo.
-echo [2/4] 外部変形本体をビルドします...
+echo [2/4] �O���ό`�{�̂��r���h���܂�...
 python -m PyInstaller --noconfirm ^
     --distpath dist\jww --workpath build\gaihen ^
     packaging\jwcad_volume_gaihen.spec
 if errorlevel 1 goto :failed
 
 echo.
-echo [3/4] コマンド版をビルドします...
+echo [3/4] �R�}���h�ł��r���h���܂�...
 python -m PyInstaller --noconfirm ^
     --distpath dist\jww --workpath build\cli ^
     packaging\jwcad_volume_cli.spec
 if errorlevel 1 goto :failed
 
 echo.
-echo [4/4] バッチと設定ファイルを配置します...
-copy /Y "jww\最大ボリューム計算.bat" "dist\jww\" >nul
-copy /Y "jww\診断_データ確認.bat" "dist\jww\" >nul
+echo [4/4] �o�b�`�Ɛݒ�t�@�C����z�u���܂�...
+copy /Y "jww\�ő�{�����[���v�Z.bat" "dist\jww\" >nul
+copy /Y "jww\�f�f_�f�[�^�m�F.bat" "dist\jww\" >nul
 copy /Y "jww\gaihen_params.yaml" "dist\jww\" >nul
 if errorlevel 1 goto :failed
 
 echo.
 echo ===================================================================
-echo  ビルド完了: dist\jww\ フォルダをまるごと好きな場所に置いてください。
+echo  �r���h����: dist\jww\ �t�H���_���܂邲�ƍD���ȏꏊ�ɒu���Ă��������B
 echo.
-echo  次の手順:
-echo    1. dist\jww\gaihen_params.yaml を敷地の条件に合わせて編集
-echo    2. JWWで敷地の外形線を線色で描き分けて範囲選択
-echo    3. [その他]-[外部変形] から 最大ボリューム計算.bat を選ぶ
+echo  ���̎菇:
+echo    1. dist\jww\gaihen_params.yaml ��~�n�̏����ɍ��킹�ĕҏW
+echo    2. JWW�ŕ~�n�̊O�`������F�ŕ`�������Ĕ͈͑I��
+echo    3. [���̑�]-[�O���ό`] ���� �ő�{�����[���v�Z.bat ��I��
 echo.
-echo  うまく動かない場合は、先に 診断_データ確認.bat を実行して
-echo  診断結果.txt を確認してください。
+echo  ���܂������Ȃ��ꍇ�́A��� �f�f_�f�[�^�m�F.bat �����s����
+echo  �f�f����.txt ���m�F���Ă��������B
 echo ===================================================================
 goto :end
 
 :failed
 echo.
-echo *** ビルドに失敗しました。上のエラーメッセージを確認してください。 ***
+echo *** �r���h�Ɏ��s���܂����B��̃G���[���b�Z�[�W���m�F���Ă��������B ***
 exit /b 1
 
 :end
