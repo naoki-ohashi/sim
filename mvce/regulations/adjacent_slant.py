@@ -1,0 +1,137 @@
+"""隣地斜線制限（法56条1項2号）と令135条の3の緩和.
+
+    高さ制限 H = 立上り高さ + 勾配 × L
+    L = 隣地境界線からの水平距離（＋後退緩和・公園等の緩和）
+
+    立上り/勾配: 住居系 20m + 1.25 / その他 31m + 2.5
+
+適用する緩和:
+
+- **後退緩和（法56条1項2号）**: 建物を隣地境界線から A だけ後退させると、
+  隣地境界線が A だけ外側にあるものとみなす。
+- **令135条の3第1項1号（公園・広場・水面等）**: 敷地がこれらに接する場合、
+  隣地境界線がその幅の**1/2**だけ外側にあるものとみなす。
+  （道路斜線の令134条が「幅の全部」なのに対し、こちらは1/2である点に注意）
+- **令135条の3第1項2号（高低差緩和）**: 敷地の地盤面が隣地より1m以上低い
+  場合、地盤面が (高低差 - 1) / 2 だけ高い位置にあるものとみなす。
+
+第一種・第二種低層住居専用地域と田園住居地域は、法55条の絶対高さ制限
+（10mまたは12m）が先に効くため、隣地斜線の適用はありません。
+"""
+from __future__ import annotations
+
+import math
+
+from ..geometry import Point, point_line_distance
+from ..site import Boundary, RelaxationKind, Site
+from ..zoning import (
+    adjacent_slant_item,
+    adjacent_slant_params,
+    adjacent_slant_setback_applies,
+)
+
+# 令135条の3第1項1号の緩和対象: 公園・広場・水面・線路敷
+# 令135条の3第1項第1号が列挙するのは
+# 「公園（都市公園法施行令2条1項1号に規定する都市公園を除く）、広場、水面
+#   その他これらに類するもの」。
+#
+# **線路敷は列挙されていません。** 北側（令135条の4）と日影（令135条の12）は
+# 線路敷を明示しているのに、隣地と道路は挙げていない。書き分けられていると
+# 読むのが素直なので、条文どおり外してあります。
+#
+# **都市公園も明文で除かれます。** `RelaxationKind.URBAN_PARK` として
+# 種類を分けているので、ここに入れないだけで除外できます。
+#
+# 線路敷を「その他これらに類するもの」に含める運用の行政庁もあるので、
+# `Site.railway_is_adjacent_relaxation` で明示的に有効にできます
+# （原則A: 方式差はコードの if ではなく設定で持つ）。
+ADJACENT_RELAXATION_KINDS = {RelaxationKind.PARK, RelaxationKind.WATER}
+
+
+def _relaxation_extra(edge: Boundary, site: Site | None = None) -> float:
+    """公園・水面等の幅の 1/2（令135条の3第1項1号）。"""
+    kinds = set(ADJACENT_RELAXATION_KINDS)
+    if site is not None and site.railway_is_adjacent_relaxation:
+        kinds.add(RelaxationKind.RAILWAY)
+    relax = edge.relaxation
+    if relax.active and relax.kind in kinds:
+        return relax.width_m / 2.0
+    return 0.0
+
+
+def _level_relaxation(edge: Boundary) -> float:
+    """令135条の3第1項2号: 地盤面が隣地より1m以上低い場合の緩和。"""
+    h = edge.ground_level_diff_m
+    return (h - 1.0) / 2.0 if h >= 1.0 else 0.0
+
+
+def applies(site: Site) -> bool:
+    """隣地斜線の適用がある用途地域か。
+
+    適用の有無は法56条1項2号イ〜ニの列挙だけで決まるので、勾配の指定が
+    無い無指定区域でもここは答えられます（`_params()` は答えられません）。
+    """
+    return adjacent_slant_item(site.zoning.zone_type) is not None
+
+
+def _setback_addition(site: Site, edge) -> float:
+    """後退距離の加算（法56条1項2号の本文）。
+
+    号の本文の括弧書きにより、**ロ・ハの地域で特定行政庁が指定する区域内の
+    建築物には加算しません**。指定はイのただし書と同じものとみて
+    `adjacent_slant_2_5_designated` で受けています（`zoning.py` の
+    `adjacent_slant_setback_applies()` に読み方を書きました）。
+
+    加算しないほうが**厳しい側**です。既定（指定なし）は加算するので、
+    2026-08-30 以前と同じ挙動です。
+    """
+    if adjacent_slant_setback_applies(
+            site.zoning.zone_type, site.zoning.adjacent_slant_2_5_designated):
+        return edge.wall_setback_m
+    return 0.0
+
+
+def edge_height_limit(site: Site, edge_index: int, point: Point) -> float:
+    edge = site.edges[edge_index]
+    params = adjacent_slant_params(
+        site.zoning.zone_type,
+        site.zoning.far_ratio,
+        site.zoning.unspecified_adjacent_slant_slope,
+        site.zoning.adjacent_slant_2_5_designated,
+    )
+    if params is None:
+        return math.inf
+    start_height, slope = params
+    L = (point_line_distance(point, edge.p1, edge.p2)
+         + _setback_addition(site, edge) + _relaxation_extra(edge, site))
+    return start_height + slope * L + _level_relaxation(edge)
+
+
+def height_limit_at(site: Site, point: Point) -> float:
+    if not applies(site):
+        return math.inf
+    limits = [
+        edge_height_limit(site, i, point)
+        for i, e in enumerate(site.edges)
+        if e.kind.value == "adjacent"
+    ]
+    return min(limits) if limits else math.inf
+
+
+def required_setback_for_height(site: Site, edge_index: int, height_m: float) -> float:
+    """高さ `height_m` を確保するために必要な、隣地境界線からの後退距離。"""
+    edge = site.edges[edge_index]
+    params = adjacent_slant_params(
+        site.zoning.zone_type,
+        site.zoning.far_ratio,
+        site.zoning.unspecified_adjacent_slant_slope,
+        site.zoning.adjacent_slant_2_5_designated,
+    )
+    if params is None or edge.kind.value != "adjacent" or height_m <= 0:
+        return 0.0
+    start_height, slope = params
+    base = _setback_addition(site, edge) + _relaxation_extra(edge, site)
+    h0 = start_height + slope * base + _level_relaxation(edge)
+    if height_m <= h0:
+        return 0.0
+    return (height_m - _level_relaxation(edge) - start_height) / slope - base

@@ -11,19 +11,21 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0"]
+# pyproj は mvce/crs.py の投影計算を突き合わせる独立実装として
+# テストでのみ使います。実行時には要りません（無ければその検証だけ skip）。
+dev = ["pytest>=7.0", "pyproj>=3.4"]
 
 [project.scripts]
 jwcad-volume = "jwcad_volume.cli:main"
 jwcad-volume-gaihen = "jwcad_volume.gaihen:main"
-mve = "mve.cli:main"
+mvce = "mvce.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["jwcad_volume*", "mve*"]
+include = ["jwcad_volume*", "mvce*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

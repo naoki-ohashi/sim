@@ -7,7 +7,7 @@ byte-level protocol this project has not been able to verify against a real
 JWW installation.
 
 JWW only reads old-style DXF, so the drawing is written through
-``mve.io.dxf_pen.JwwDrawing`` (R12, LINE/TEXT only, millimetres, Shift-JIS).
+``mvce.io.dxf_pen.JwwDrawing`` (R12, LINE/TEXT only, millimetres, Shift-JIS).
 Writing R2010 with LWPOLYLINE in metres -- as this module used to -- imports
 without an error but leaves the JWW drawing empty. See ``dxf_pen.py``.
 """
@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 from shapely.geometry import LineString
 
-from mve.io.dxf_pen import JWW_UNITS_PER_METER, JwwDrawing
+from mvce.io.dxf_pen import JWW_UNITS_PER_METER, JwwDrawing
 
 from ..envelope import EnvelopeResult
 from ..massing import Block
