@@ -295,10 +295,28 @@ output:
 オフラインで動き、そのまま渡せます。最大ボリューム（オレンジ）と斜線制限の
 エンベロープ（青の半透明）を重ねて表示します。
 
+### 各階床面積表（Excel）・3Dモデル（MVCE3）
+
+```bash
+mvce 敷地.yaml --floor-area-xlsx 各階床面積表.xlsx \
+               --model3d-out 建物.obj --model3d-backend mesh
+```
+
+階ごとの床面積を `.xlsx` で、階ごとのボリュームを立体化した3Dモデルを
+`.obj`（既定・追加インストール不要）／FreeCAD（`.FCStd`/`.step`/`.ifc`）／
+Blender（`.blend`/`.glb`/`.gltf`/`.obj`）のいずれかで書き出せます。
+
+**確認申請の床面積表としては使えません。** 用途別内訳・容積率不算入部分は
+含まない近似値です。FreeCAD／Blenderバックエンドはこの環境で動作確認して
+いません（詳細は `mvce3_basic_spec.md`・`mvce3_design_spec.md`・
+`disclaimer.md`）。
+
 ## ドキュメント
 
 - `manual.md` — **取扱説明書**（始め方・敷地データの作り方・結果の読み方・トラブル対処）
 - `design_spec.md` — **設計仕様書**（データモデル・法令対応・アルゴリズム・出力仕様）
+- `mvce3_basic_spec.md` — **MVCE3 基本仕様書**（各階床面積表・3Dモデル化の要件）
+- `mvce3_design_spec.md` — **MVCE3 基本設計書**（同・モジュール構成とデータ構造）
 - `web_ui.md` — ブラウザ版UIの使い方とPython版との一致検証
 - `legal_basis.md` — どの計算がどの条文に基づくか、緩和対象の違いの一覧
 - `methodology.md` — ボクセル最適化の考え方と、旧方式との比較

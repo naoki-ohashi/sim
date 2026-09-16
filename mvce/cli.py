@@ -14,6 +14,9 @@ from .config import load_project
 from .io.drawing import BACKENDS, write_dxf
 from .io.viewer3d import write_html
 from .index.isochrone import site_isochrones
+from .model3d import BACKENDS as MODEL3D_BACKENDS
+from .model3d import Model3DBackendUnavailable, build_model3d
+from .reports.floor_area_table import build_floor_area_table, write_floor_area_table_xlsx
 from .solvers.optimizer import ENVELOPE_FAMILIES, optimize
 
 
@@ -39,6 +42,22 @@ def main(argv: list[str] | None = None) -> int:
         "--envelope", choices=ENVELOPE_FAMILIES, dest="envelope_family",
         help="日影規制への対応方法（既定voxel＝自由形 / lean_to＝屋根越し / ridge＝棟状。"
              "逆日影の建築的な量塊が欲しい場合は lean_to か ridge を指定）",
+    )
+    parser.add_argument(
+        "--floor-area-xlsx", metavar="ファイル",
+        help="MVCE3: 各階床面積表（近似値）をExcel(.xlsx)で出力する"
+             "（output.floor_area_xlsx_path を上書き）",
+    )
+    parser.add_argument(
+        "--model3d-out", metavar="ファイル",
+        help="MVCE3: 3Dモデルの出力先（output.model3d_path を上書き）。"
+             "拡張子はバックエンドに合わせる（mesh=.obj / "
+             "freecad=.FCStd,.step,.ifc / blender=.blend,.glb,.gltf,.obj）",
+    )
+    parser.add_argument(
+        "--model3d-backend", choices=MODEL3D_BACKENDS,
+        help="MVCE3: 3Dモデル化のバックエンド（既定mesh＝追加インストール"
+             "不要 / freecad・blenderは別途本体が要る。model3d.py参照）",
     )
     args = parser.parse_args(argv)
 
@@ -98,6 +117,37 @@ def main(argv: list[str] | None = None) -> int:
             return _write_failed("3Dビューア", html_path, exc)
         print(f"3Dビューアを書き出しました: {os.path.abspath(html_path)}"
               "（ブラウザで開けます）")
+
+    floor_area_xlsx_path = args.floor_area_xlsx or project.output.floor_area_xlsx_path
+    if floor_area_xlsx_path:
+        table = build_floor_area_table(result)
+        try:
+            write_floor_area_table_xlsx(table, floor_area_xlsx_path)
+        except (OSError, ImportError) as exc:
+            print(f"各階床面積表の書き出しに失敗しました: {floor_area_xlsx_path}",
+                  file=sys.stderr)
+            print(f"  理由: {exc}", file=sys.stderr)
+            return 1
+        print(f"各階床面積表を書き出しました: {os.path.abspath(floor_area_xlsx_path)}"
+              "（MVCE3の近似値。用途別内訳・不算入部分は含みません）")
+
+    model3d_path = args.model3d_out or project.output.model3d_path
+    if model3d_path:
+        model3d_backend = args.model3d_backend or project.output.model3d_backend
+        try:
+            stats = build_model3d(result, model3d_path, backend=model3d_backend)
+        except Model3DBackendUnavailable as exc:
+            print(f"3Dモデルの書き出しに失敗しました（backend={model3d_backend}）: "
+                  f"{model3d_path}", file=sys.stderr)
+            print(f"  理由: {exc}", file=sys.stderr)
+            return 1
+        except OSError as exc:
+            return _write_failed("3Dモデル", model3d_path, exc)
+        print(f"3Dモデルを書き出しました: {os.path.abspath(model3d_path)}"
+              f"（backend={stats['backend']}・{stats['floor_count']}階）")
+        if stats.get("holes_ignored"):
+            print(f"  ※ 中抜き（穴）のある階が{stats['holes_ignored']}件あり、"
+                  "外周のみで描画しました（このバックエンドの制限）。")
 
     return 0
 

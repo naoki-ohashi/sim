@@ -14,6 +14,11 @@ dependencies = [
 # pyproj は mvce/crs.py の投影計算を突き合わせる独立実装として
 # テストでのみ使います。実行時には要りません（無ければその検証だけ skip）。
 dev = ["pytest>=7.0", "pyproj>=3.4"]
+# MVCE3: 各階床面積表（.xlsx）の出力に使います（mvce/reports/floor_area_table.py）。
+xlsx = ["openpyxl>=3.1"]
+# MVCE3: 3Dモデル化（mvce/model3d/）の既定バックエンド（mesh）は追加依存なしで
+# 動きます。FreeCAD・Blenderはpipパッケージではなく別途本体のインストールが
+# 要るため、ここには含めていません（mvce/model3d/__init__.py 参照）。
 
 [project.scripts]
 jwcad-volume = "jwcad_volume.cli:main"

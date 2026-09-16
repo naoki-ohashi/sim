@@ -41,6 +41,15 @@ class OutputSettings:
     dxf_units_per_meter: float = JWW_UNITS_PER_METER
     #: 書き出しの実装。r12 = JW-CAD向けの最小構成 / ezdxf = 他CAD互換重視
     dxf_backend: str = "r12"
+    #: MVCE3: 各階床面積表（.xlsx）の出力先。省略すると出力しない。
+    floor_area_xlsx_path: str | None = None
+    #: MVCE3: 3Dモデルの出力先。省略すると出力しない。拡張子はバックエンド
+    #: ごとに対応するものを指定する（`mesh`なら.obj、`freecad`なら.FCStd/
+    #: .step/.ifc、`blender`なら.blend/.glb/.gltf/.obj）。
+    model3d_path: str | None = None
+    #: MVCE3: 3Dモデル化のバックエンド。mesh（既定・追加インストール不要）/
+    #: freecad（要FreeCAD本体）/ blender（要Blender本体）。
+    model3d_backend: str = "mesh"
 
 
 @dataclass
