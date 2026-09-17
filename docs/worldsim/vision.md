@@ -76,6 +76,8 @@ WorldSim の最終工程を仮に **Presentation Twin** と位置づけます。
 
 ## 6. 次に進める作業（SiteInfo 項目定義書を土台に）
 
+SiteInfo の入力要件は [`siteinfo_requirements.md`](siteinfo_requirements.md) にまとめてあります。
+
 1. SiteInfo のデータベース構造図
 2. PostgreSQL／PostGIS のテーブル設計
 3. Codex 向け実装指示書
