@@ -78,10 +78,12 @@ WorldSim の最終工程を仮に **Presentation Twin** と位置づけます。
 
 SiteInfo の入力要件は [`siteinfo_requirements.md`](siteinfo_requirements.md) にまとめてあります。
 
-1. SiteInfo のデータベース構造図
-2. PostgreSQL／PostGIS のテーブル設計
-3. Codex 向け実装指示書
-4. SiteInfo 入力・確認画面の設計
+1. SiteInfo のデータベース構造図 → [`siteinfo_db_design.md`](siteinfo_db_design.md)
+2. PostgreSQL／PostGIS のテーブル設計 → `db/siteinfo/schema.sql`
+3. Codex／Claude Code 向け実装指示書 → [`siteinfo_implementation_guide.md`](siteinfo_implementation_guide.md)、[`siteinfo_agent_prompts.md`](siteinfo_agent_prompts.md)
+4. SiteInfo 入力・確認画面の設計 → [`siteinfo_ui_design.md`](siteinfo_ui_design.md)
+
+項目定義書は [`siteinfo_field_definitions.md`](siteinfo_field_definitions.md)。
 
 ## 7. 進め方の約束
 
