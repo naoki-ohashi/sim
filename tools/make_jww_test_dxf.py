@@ -24,8 +24,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from mve.io.dxf_pen import JwwDrawing          # noqa: E402
-from mve.io.dxf_r12 import R12Drawing          # noqa: E402
+from mvce.io.dxf_pen import JwwDrawing          # noqa: E402
+from mvce.io.dxf_r12 import R12Drawing          # noqa: E402
 
 SQUARE = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]
 
@@ -58,7 +58,7 @@ def build(out_dir: Path) -> list[Path]:
     # 03 レイヤ4枚
     pen = R12Drawing()
     for i, (layer, color) in enumerate(
-            [("MVE-SITE", 7), ("MVE-ROAD", 8), ("MVE-MESH", 3), ("MVE-OUTLINE", 5)]):
+            [("MVCE-SITE", 7), ("MVCE-ROAD", 8), ("MVCE-MESH", 3), ("MVCE-OUTLINE", 5)]):
         y = i * 2.0
         pen.line((0.0, y), (10.0, y), layer, color)
     _cross(pen)
@@ -70,7 +70,7 @@ def build(out_dir: Path) -> list[Path]:
     _cross(pen)
     for i in range(19):
         y = i * 0.5
-        pen.line((0.0, y), (10.0, y), f"MVE-TEST-{i:02d}", (i % 7) + 1)
+        pen.line((0.0, y), (10.0, y), f"MVCE-TEST-{i:02d}", (i % 7) + 1)
     made.append(out_dir / "04_レイヤ19枚.dxf")
     pen.save(str(made[-1]))
 

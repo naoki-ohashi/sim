@@ -11,19 +11,26 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0"]
+# pyproj は mvce/crs.py の投影計算を突き合わせる独立実装として
+# テストでのみ使います。実行時には要りません（無ければその検証だけ skip）。
+dev = ["pytest>=7.0", "pyproj>=3.4"]
+# MVCE3: 各階床面積表（.xlsx）の出力に使います（mvce/reports/floor_area_table.py）。
+xlsx = ["openpyxl>=3.1"]
+# MVCE3: 3Dモデル化（mvce/model3d/）の既定バックエンド（mesh）は追加依存なしで
+# 動きます。FreeCAD・Blenderはpipパッケージではなく別途本体のインストールが
+# 要るため、ここには含めていません（mvce/model3d/__init__.py 参照）。
 
 [project.scripts]
 jwcad-volume = "jwcad_volume.cli:main"
 jwcad-volume-gaihen = "jwcad_volume.gaihen:main"
-mve = "mve.cli:main"
+mvce = "mvce.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["jwcad_volume*", "mve*"]
+include = ["jwcad_volume*", "mvce*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
