@@ -190,9 +190,13 @@ create table site_zoning (
     -- 都市計画法
     area_division               area_division,
     zone_type                   text references zone_type_catalog,
-    zone_type_secondary         jsonb,      -- [{"zone_type": "...", "area_m2": ...}]
-    far_percent                 int check (far_percent between 50 and 1300),
-    bcr_percent                 int check (bcr_percent between 30 and 100),
+        -- 2 以上の用途地域にまたがるときは site_zone_part から導出した
+        -- 「過半の面積を占める用途地域」を入れる（法 91 条。要原文照合）
+    zoning_split                boolean not null default false,
+        -- true なら site_zone_part が正で、far/bcr は面積按分の値
+    far_percent                 numeric(6, 2) check (far_percent between 50 and 1300),
+        -- 按分すると小数になるので numeric
+    bcr_percent                 numeric(6, 2) check (bcr_percent between 30 and 100),
     bcr_bonus_corner            boolean,
     bcr_bonus_fireproof         boolean,
     fire_zone                   fire_zone,
@@ -220,6 +224,80 @@ create table site_zoning (
     building_agreement          text,
     local_ordinances            jsonb       -- [{"name":..., "summary":...}]
 );
+
+-- ---------------------------------------------------------------------
+-- 用途地域の分割（敷地が 2 以上の用途地域にまたがる場合）
+--
+-- 地図上の用途地域境界をトレースしたポリゴンで敷地を分け、部分ごとに
+-- 用途地域・指定容積率・指定建蔽率を持つ。
+--   用途    : 面積が過半の部分の用途地域を敷地の用途地域とする
+--             （建築基準法 91 条。原文照合は docs/mve/legal_basis.md の流儀で）
+--   容積率  : 部分の面積で按分した加重平均（法 52 条 7 項。要原文照合）
+--   建蔽率  : 同じく面積按分（法 53 条 2 項。要原文照合）
+-- 斜線・日影は部分ごとに適用するので按分しない（MVE 側の仕事）。
+-- ---------------------------------------------------------------------
+create table site_zone_part (
+    site_id         uuid not null references site on delete cascade,
+    part_seq        int  not null,                       -- 0 始まり
+    zone_type       text not null references zone_type_catalog,
+    geom            geometry(MultiPolygon, 6668) not null, -- 敷地内の該当部分
+    far_percent     numeric(6, 2) not null check (far_percent between 50 and 1300),
+    bcr_percent     numeric(6, 2) not null check (bcr_percent between 30 and 100),
+    trace_source    text,   -- 'map_trace' / 'gis_intersection' / 'manual'
+    note            text,
+    primary key (site_id, part_seq),
+    constraint site_zone_part_geom_valid check (ST_IsValid(geom))
+);
+create index site_zone_part_geom_gix on site_zone_part using gist (geom);
+
+-- 部分ごとの面積（㎡）と敷地に占める割合
+create or replace function site_zone_part_areas(p_site_id uuid)
+returns table (part_seq int, zone_type text, area_m2 numeric, share numeric,
+               far_percent numeric, bcr_percent numeric)
+language sql stable as $$
+    with parts as (
+        select zp.part_seq, zp.zone_type, zp.far_percent, zp.bcr_percent,
+               ST_Area(ST_Transform(ST_Intersection(zp.geom, s.geom), s.plane_srid)) as a
+        from site_zone_part zp
+        join site s on s.site_id = zp.site_id
+        where zp.site_id = p_site_id
+    )
+    select part_seq, zone_type, round(a::numeric, 2),
+           round((a / nullif(sum(a) over (), 0))::numeric, 4),
+           far_percent, bcr_percent
+    from parts
+    order by part_seq
+$$;
+
+-- 分割から敷地全体の値を導く。
+--   zone_type   = 面積が最大（過半）の用途地域
+--   far/bcr     = 面積による加重平均（小数 2 桁）
+--   coverage    = 部分の面積合計 ÷ 敷地の図形面積（1 に近いこと）
+create or replace function site_zoning_from_parts(p_site_id uuid)
+returns table (zone_type text, zone_share numeric, far_percent numeric,
+               bcr_percent numeric, coverage numeric, part_count int)
+language sql stable as $$
+    with a as (select * from site_zone_part_areas(p_site_id)),
+         tot as (
+            select sum(area_m2) as total,
+                   sum(area_m2 * far_percent) as far_w,
+                   sum(area_m2 * bcr_percent) as bcr_w,
+                   count(*) as n
+            from a
+         ),
+         byzone as (
+            select zone_type, sum(area_m2) as za from a group by zone_type
+            order by za desc limit 1
+         )
+    select b.zone_type,
+           round((b.za / nullif(t.total, 0))::numeric, 4),
+           round((t.far_w / nullif(t.total, 0))::numeric, 2),
+           round((t.bcr_w / nullif(t.total, 0))::numeric, 2),
+           round((t.total / nullif(site_area_geom_m2(s), 0))::numeric, 4),
+           t.n::int
+    from tot t, byzone b, site s
+    where s.site_id = p_site_id
+$$;
 
 -- ---------------------------------------------------------------------
 -- 日影規制（条例の組み合わせをそのまま持つ）
@@ -399,6 +477,22 @@ returns table (ok boolean, reason text) language sql stable as $$
         where site_id = p_site_id and edge_kind = 'road'
           and (road_type is null or road_type = 'unknown')
     )
+    union all
+    -- 用途地域の分割: 分割ありなら部分が敷地を覆っていること（±1%）
+    select false, '用途地域の分割が敷地を覆っていない（覆率 ' || p.coverage || '）'
+    from site_zoning z
+    left join lateral site_zoning_from_parts(p_site_id) p on true
+    where z.site_id = p_site_id and z.zoning_split
+      and (p.coverage is null or p.coverage not between 0.99 and 1.01)
+    union all
+    -- 分割ありなら site_zoning の値が導出値と一致していること
+    select false, '用途地域の分割と敷地の用途地域・容積率・建蔽率が一致しない'
+    from site_zoning z
+    join lateral site_zoning_from_parts(p_site_id) p on true
+    where z.site_id = p_site_id and z.zoning_split
+      and (z.zone_type is distinct from p.zone_type
+           or z.far_percent is distinct from p.far_percent
+           or z.bcr_percent is distinct from p.bcr_percent)
 $$;
 
 -- ---------------------------------------------------------------------
@@ -422,6 +516,12 @@ select s.site_id,
                'zone', zc.label_ja,
                'far_percent', z.far_percent,
                'bcr_percent', z.bcr_percent,
+               'zoning_split', coalesce(z.zoning_split, false),
+               'zone_parts', (select jsonb_agg(jsonb_build_object(
+                                   'part_seq', a.part_seq, 'zone_type', a.zone_type,
+                                   'area_m2', a.area_m2, 'share', a.share,
+                                   'far_percent', a.far_percent, 'bcr_percent', a.bcr_percent))
+                              from site_zone_part_areas(s.site_id) a),
                'road_width_m', (select max(road_width_m) from site_edge e
                                 where e.site_id = s.site_id and e.edge_kind = 'road'),
                'walk_min', m.walk_min,
