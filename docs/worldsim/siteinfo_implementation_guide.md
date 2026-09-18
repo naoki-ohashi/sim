@@ -136,6 +136,18 @@ optional-dependencies に `siteinfo = ["fastapi", "uvicorn", "psycopg[binary]", 
 | `GET` | `/sites/{id}/geojson?full=1` | v0.2 の全項目＋各項目の provenance を `properties.fields` に含める |
 | `GET` | `/sites/{id}/mve.yaml` | MVE 入力 YAML（4 章） |
 
+### 3.2.1 用途地域の分割
+
+| メソッド | パス | 内容 |
+|---|---|---|
+| `GET` | `/sites/{id}/zone-parts` | 部分の一覧（ポリゴン、用途地域、指定値、面積、割合）と `site_zoning_from_parts()` の導出値 |
+| `PUT` | `/sites/{id}/zone-parts` | 部分を丸ごと置き換える。本文は `ZonePart[]`（GeoJSON ポリゴン、`zone_type`、`far_percent`、`bcr_percent`、`trace_source`）。保存後に導出値を `site_zoning` に `derived` として書き、`zoning_split = true` にする。部分が 0 件なら `zoning_split = false` に戻す |
+| `POST` | `/sites/{id}/zone-parts/split` | 地図でトレースした境界線（GeoJSON LineString、複数可）で敷地ポリゴンを切り、部分の下書きを返す（保存はしない）。部分ごとの用途地域・指定値は空で返し、画面で入力させる |
+
+規則（項目定義書 5.1）: 用途は過半の面積の部分の用途地域、容積率・建蔽率は
+面積の加重平均。導出は DB の `site_zoning_from_parts()` に任せ、Python 側で
+計算し直さない。部分の面積合計が敷地の図形面積の ±1% に収まらないときは 422。
+
 ### 3.3 自動入力・確認・確定
 
 | メソッド | パス | 内容 |
@@ -259,8 +271,8 @@ site:
     - kind: adjacent
       relaxation: {kind: water, width_m: 4.0}   # relaxation_kind != none のとき
 zoning:
-  zone_type: <zone_type_catalog.mve_code>
-  far_ratio: <far_percent>
+  zone_type: <zone_type_catalog.mve_code>   # 分割ありなら過半の用途地域
+  far_ratio: <far_percent>                  # 分割ありなら面積按分値
   coverage_ratio: <bcr_percent>
   absolute_height_limit_m: <あれば>
 shadow:                            # shadow_applies == regulated のときだけ
@@ -322,7 +334,11 @@ class Adapter(Protocol):
 - 取得元のレスポンスは `raw_value` にそのまま残す（サイズ上限 64KB、超えたら要約）。
 - **点で引くときは centroid、面で引くときは敷地ポリゴンとの交差**を使う。
   用途地域のように敷地が 2 区域にまたがることがある項目は、交差する地物を
-  すべて `raw_value` に残し、面積最大のものを `value` にして `note` で警告する。
+  すべて `raw_value` に残す。交差が 2 件以上で、2 番目以降の交差面積が敷地の
+  5% を超えるときは、交差ポリゴンから `site_zone_part` の下書き（`trace_source =
+  'gis_intersection'`、`unconfirmed`）を作り、`zone_type` / `far_percent` /
+  `bcr_percent` には `site_zoning_from_parts()` の導出値を提案する。5% 以下なら
+  面積最大の地物だけを提案し、`note` に他の地物を書く。
 - `gis_source` テーブルに該当行が無ければ、アダプタ初回実行時に登録する
   （`name`、`provider`、`dataset`、`url`、`license`）。
 
@@ -493,6 +509,7 @@ fixture は `tests/siteinfo/fixtures/<adapter>/<case>.json` に、取得日と U
 ### M2: provenance と確認・確定
 
 - [ ] `provenance.py`、`PATCH /sites/{id}`、`confirm` / `reject` / `confirm-check` / `confirm` / `reopen`
+- [ ] 用途地域の分割 API（3.2.1）。分割ありの敷地で導出値が `site_zoning` に `derived` として入り、覆率が範囲外なら確定できないテスト
 - [ ] `SiteDetail.fields` に provenance が束ねられて返る
 - [ ] 確認していない必須項目があると `confirm` が 409 で理由を返す
 - [ ] `site_history` に版が残る

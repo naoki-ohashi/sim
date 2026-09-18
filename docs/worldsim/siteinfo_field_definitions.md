@@ -121,10 +121,11 @@ SiteInfo は **敷地情報を入力するデータベースのカード** で�
 | キー | 項目名 | 型 | 単位 | 必須 | 自動 | 取得元候補 | 根拠・備考 |
 |---|---|---|---|---|---|---|---|
 | `area_division` | 区域区分 | enum | | ◎ | ○ | 都市計画 GIS | `urbanization_promotion`（市街化区域）／`urbanization_control`（市街化調整区域）／`undivided`（非線引き）／`outside`（都市計画区域外）／`quasi_city_planning`（準都市計画区域） |
-| `zone_type` | 用途地域 | enum | | ◎ | ◎ | reinfolib、都市計画 GIS | 法 48 条・別表第二。MVE `zone_type`（`1res` 〜 `industrial_exclusive` の 13 区分＋無指定） |
-| `zone_type_secondary` | 用途地域（2 以上にわたる場合） | json | | ○ | ○ | 同上 | 面積按分のための区分と面積 |
-| `far_percent` | 指定容積率 | int | % | ◎ | ◎ | reinfolib | 法 52 条 1 項 |
-| `bcr_percent` | 指定建蔽率 | int | % | ◎ | ◎ | reinfolib | 法 53 条 1 項 |
+| `zone_type` | 用途地域 | enum | | ◎ | ◎ | reinfolib、都市計画 GIS | 法 48 条・別表第二。MVE `zone_type`（`1res` 〜 `industrial_exclusive` の 13 区分＋無指定）。2 以上にまたがる場合は 5.1 の規則で過半の用途地域 |
+| `zoning_split` | 用途地域の分割あり | bool | | ◎ | ○ | 都市計画 GIS との交差 | true なら `zone_parts` が正で、用途・容積率・建蔽率は 5.1 の導出値 |
+| `zone_parts` | 用途地域の分割（部分ごと） | json | | ◎（分割あり） | ○ | 地図トレース／GIS 交差 | 部分ごとのポリゴン、用途地域、指定容積率、指定建蔽率。DB は `site_zone_part` |
+| `far_percent` | 指定容積率 | num | % | ◎ | ◎ | reinfolib | 法 52 条 1 項。分割ありなら面積按分（小数 2 桁） |
+| `bcr_percent` | 指定建蔽率 | num | % | ◎ | ◎ | reinfolib | 法 53 条 1 項。分割ありなら面積按分（小数 2 桁） |
 | `bcr_bonus_corner` | 角地加算の適用 | bool | | ○ | × | 自治体の指定基準 | 法 53 条 3 項 2 号 |
 | `bcr_bonus_fireproof` | 防火地域内耐火建築物等の加算 | bool | | ○ | ○ | 防火地域から判断 | 法 53 条 3 項 1 号 |
 | `fire_zone` | 防火・準防火地域 | enum | | ◎ | ◎ | reinfolib | `fire` / `quasi_fire` / `none`／法 22 条区域は `article22` |
@@ -139,6 +140,30 @@ SiteInfo は **敷地情報を入力するデータベースのカード** で�
 | `redevelopment_project` | 市街地再開発事業・区画整理事業 | text | | ○ | ○ | 都市計画 GIS | |
 | `development_permit_required` | 開発許可の要否 | enum | | ○ | × | | `required` / `not_required` / `unknown`（法 29 条） |
 | `min_lot_area_m2` | 敷地面積の最低限度 | num | ㎡ | ○ | ○ | 都市計画 GIS | 法 53 条の 2 |
+
+### 5.1 用途地域が 2 以上にまたがる場合の按分ルール（決定）
+
+敷地が 2 以上の用途地域にまたがるときは、次の手順で敷地全体の値を決めます。
+
+1. **分割**: 地図上の用途地域境界をトレースしたポリゴン（または都市計画 GIS との
+   交差）で敷地を部分に分け、部分ごとに用途地域・指定容積率・指定建蔽率を持つ
+   （`zone_parts`、DB は `site_zone_part`）。
+2. **面積**: 部分ごとの面積を平面直角座標で算定する。部分の面積合計は敷地の
+   図形面積と一致すること（±1%）。一致しないと確定できない。
+3. **用途**: **過半の面積を占める部分の用途地域**を、その敷地の用途地域
+   （`zone_type`）とする。
+4. **容積率・建蔽率**: 部分の面積による **加重平均（面積按分）** を、その敷地の
+   指定容積率（`far_percent`）・指定建蔽率（`bcr_percent`）とする。
+   小数 2 桁で保持する。
+5. 斜線制限・日影規制は部分ごとに適用するものなので按分しない。部分ごとの
+   適用は MVE 側の仕事とし、SiteInfo は `zone_parts` を渡す。
+
+導出は DB の `site_zoning_from_parts(site_id)` が行い、画面は導出値を
+「計算」バッジで表示する。ユーザーは分割の形と部分ごとの値を確認する。
+
+根拠（原文照合は `docs/mve/legal_basis.md` の流儀で行う）:
+用途は建築基準法 91 条（敷地が区域の内外にわたる場合は過半の属する区域の規定）、
+容積率は法 52 条 7 項、建蔽率は法 53 条 2 項（いずれも面積按分）。
 
 ## 6. 建築基準法の形態規制（F）
 
@@ -257,7 +282,7 @@ v0.1 の `properties` は v0.2 の項目に次のように対応します。書�
 | `address` | `address` |
 | `area_m2` / `area_tsubo` / `area_is_manual` | `area_effective_m2` / `area_tsubo` / `area_basis = manual` |
 | `zone` / `zone_id` | `zone_type`（表示名は辞書から） |
-| `far_percent` / `bcr_percent` | 同名 |
+| `far_percent` / `bcr_percent` | 同名（分割ありなら按分値。v0.2 では `zoning_split` と `zone_parts` も併記） |
 | `road_width_m` | 道路辺の `road_width_m`（最大幅員） |
 | `walk_min` / `land_price_man_per_tsubo` | 同名 |
 | `district_plan` / `fire_zone` / `height_zone` | `district_plan` / `fire_zone` / `height_district` |
@@ -277,8 +302,7 @@ SiteInfo を `confirmed` にできるのは、次をすべて満たしたとき�
 
 ## 13. 未決事項
 
-- 用途地域が 2 以上にわたる場合の按分ルールをどこで解くか（SiteInfo は面積を
-  持つだけにする方針）。
+- ~~用途地域が 2 以上にわたる場合の按分ルール~~ → 5.1 で決定（2026-09-18）。
 - 所有者情報の保存範囲と閲覧権限。
 - 自治体ごとの GIS 取得元の登録方法（`gis_source` テーブルで管理する案）。
 - 別表第一・第二（用途制限）の参照表をどのエンジンが使うか。
