@@ -1,0 +1,13 @@
+{
+  "name": "siteinfo-host",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SiteInfo（敷地情報取得エンジン）のElectronホスト。行政GIS（reinfolib）をメインプロセス経由で取得する。",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^43.4.1"
+  }
+}
