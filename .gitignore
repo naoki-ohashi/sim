@@ -6,6 +6,7 @@ build/
 dist/
 *.dxf
 .venv/
+node_modules/
 # Obsidian: 共有するのは app.json だけ。個人の作業状態やキャッシュは除外
 .obsidian/*
 !.obsidian/app.json

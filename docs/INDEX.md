@@ -57,4 +57,10 @@ status: generated
 | 文書 | 内容 | 状態 |
 |---|---|---|
 | [保管（docs/archive）](archive/README.md) | 統合済み・古い版の md の保管場所。参照はしない。 | stable |
+
+## siteinfo
+
+| 文書 | 内容 | 状態 |
+|---|---|---|
+| [SiteInfo 設計仕様書](siteinfo/design_spec.md) | 正本は siteinfo/index.html（単一HTML・ビルド不要）。 |  |
 <!-- END GENERATED INDEX -->
