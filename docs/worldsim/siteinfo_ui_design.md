@@ -1,3 +1,10 @@
+---
+summary: SiteInfo の入力・確認画面。3 ステップ構成、項目行の標準、境界トレース UI、状態遷移、受け入れ条件。
+status: draft
+owner: 大橋
+updated: 2026-09-18
+---
+
 # SiteInfo 入力・確認画面 設計書 v0.2（草案）
 
 > [`siteinfo_field_definitions.md`](siteinfo_field_definitions.md) の項目を、

@@ -1,3 +1,10 @@
+---
+summary: SiteInfo の ER 図とテーブル一覧、provenance・法令行・分割ポリゴンなどの設計判断、MVE へのマッピング。DDL は db/siteinfo/schema.sql が正。
+status: draft
+owner: 大橋
+updated: 2026-09-18
+---
+
 # SiteInfo データベース構造図・PostGIS テーブル設計 v0.2（草案）
 
 > [`siteinfo_field_definitions.md`](siteinfo_field_definitions.md)（項目定義書）を

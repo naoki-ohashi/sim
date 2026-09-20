@@ -1,3 +1,10 @@
+---
+summary: Codex／Claude Code／Gemini 向けの実装指示。API、GeoJSON 入出力、取得元ごとの自動入力アダプタ、マイルストーン M1〜M6。
+status: draft
+owner: 大橋
+updated: 2026-09-18
+---
+
 # SiteInfo 実装指示書 v0.2（Codex／Claude Code 共通）
 
 > この文書は、コーディングエージェント（OpenAI Codex、Claude Code）に SiteInfo を

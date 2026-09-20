@@ -1,0 +1,19 @@
+{
+  "useMarkdownLinks": true,
+  "newLinkFormat": "relative",
+  "alwaysUpdateLinks": true,
+  "showUnsupportedFiles": false,
+  "attachmentFolderPath": "./assets",
+  "userIgnoreFilters": [
+    "mve/",
+    "web/",
+    "jwcad_volume/",
+    "tests/",
+    "tools/",
+    "db/",
+    "build/",
+    "dist/",
+    ".venv/",
+    "node_modules/"
+  ]
+}

@@ -1,3 +1,10 @@
+---
+summary: WorldSim 全体の考え方。正確性の層と表現の層を分ける原則、AI とツールの役割分担、Presentation Twin。
+status: stable
+owner: 大橋
+updated: 2026-09-17
+---
+
 # WorldSim 構想ノート（大橋の考え方）
 
 > このファイルは、MVE の先にある **WorldSim** 構想について、オーナー（大橋）の
@@ -84,6 +91,9 @@ SiteInfo の入力要件は [`siteinfo_requirements.md`](siteinfo_requirements.m
 4. SiteInfo 入力・確認画面の設計 → [`siteinfo_ui_design.md`](siteinfo_ui_design.md)
 
 項目定義書は [`siteinfo_field_definitions.md`](siteinfo_field_definitions.md)。
+
+文書の整理・統合（Obsidian と Codex／Claude Code／Gemini の連携）は
+[`knowledge_base.md`](knowledge_base.md)、索引は [`../INDEX.md`](../INDEX.md)。
 
 ## 7. 進め方の約束
 

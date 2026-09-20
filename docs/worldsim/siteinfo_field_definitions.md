@@ -1,3 +1,10 @@
+---
+summary: SiteInfo の入力項目（グループ A〜K）、メタ属性、用途地域が 2 以上にまたがる場合の按分ルール、確定条件。
+status: draft
+owner: 大橋
+updated: 2026-09-18
+---
+
 # SiteInfo 項目定義書 v0.2（草案）
 
 > WorldSim の出発点となる **敷地情報（SiteInfo）** の入力項目を定義します。
