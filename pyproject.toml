@@ -23,7 +23,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["jwcad_volume*", "mve*"]
+include = ["jwcad_volume*", "mve*", "building_finance*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
