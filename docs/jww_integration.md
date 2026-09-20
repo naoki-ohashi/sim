@@ -39,7 +39,7 @@ cp1252のままだと `\U+XXXX` というエスケープになり、JWWでは文
 mで作図している図面に合わせたい場合だけ、単位を変えられます。
 
 ```bash
-mve 敷地.yaml --dxf-units 1
+mvce 敷地.yaml --dxf-units 1
 ```
 
 読み込んだ直後に何も見えないときは、まず **JWWの「全体表示」** を試して
@@ -49,7 +49,7 @@ mve 敷地.yaml --dxf-units 1
 
 実際のJW-CADで表示を確認しました。分かったのは次の2点です。
 
-- **`mve/io/dxf_r12.py`（既定）の出力は表示される。**
+- **`mvce/io/dxf_r12.py`（既定）の出力は表示される。**
   大文字のテーブル名（`CONTINUOUS`/`STANDARD`）、ハンドルなし、
   `LTYPE`/`LAYER`/`STYLE` の3表のみ、CRLF、Shift-JIS という構成です。
 - **ezdxf が書くR12は、同じ図面でも表示されない。**
@@ -61,7 +61,7 @@ DXF読込の可否には影響しません。
 
 切り分けに使ったテストDXFは `tools/make_jww_test_dxf.py` で再生成できます。
 
-実装と根拠は `mve/io/dxf_r12.py`、検証は `tests/mve/test_jww_dxf_compat.py`
+実装と根拠は `mvce/io/dxf_r12.py`、検証は `tests/mvce/test_jww_dxf_compat.py`
 にあります。
 
 ## 方法2: 外部変形として登録
