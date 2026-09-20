@@ -1,0 +1,102 @@
+---
+summary: WorldSim 全体の考え方。正確性の層と表現の層を分ける原則、AI とツールの役割分担、Presentation Twin。
+status: stable
+owner: 大橋
+updated: 2026-09-17
+---
+
+# WorldSim 構想ノート（大橋の考え方）
+
+> このファイルは、MVE の先にある **WorldSim** 構想について、オーナー（大橋）の
+> 考え方を記録したものです。今後の設計判断や Codex／Claude への実装指示は、
+> このノートの方針に沿って行います。内容は会話で詰めたものを整理したもので、
+> 確定した仕様ではありません。
+
+## 1. 全体の流れ
+
+WorldSim は、ひとつの敷地・街区について次の順で検討を進める一貫した構想です。
+
+1. **SiteInfo** — 敷地に関する事実の確認（地番、面積、道路、用途地域、
+   高さ制限、日影、接道、インフラなど）
+2. **法規・建築のシミュレーション** — MVE による最大ボリューム、斜線・日影・
+   天空率の検証
+3. **市場・収支のシミュレーション** — 用途構成ごとの事業収支比較
+4. **プレゼンテーション** — 再開発後の街の姿と体験を「雰囲気まで伝わる形」で提示
+
+数字の最適解を出すだけでなく、その建物が実際に建った街の空気感まで見せる
+ところまでを WorldSim の範囲と考えます。
+
+## 2. 二つの層を分ける
+
+最も重要な設計原則は、**正確性の層と表現の層を分離する**ことです。
+
+| 層 | 役割 | 担うもの |
+|---|---|---|
+| 正確性の層 | 寸法・法規・面積・収支を満たす設計データ | SiteInfo、法規、FreeCAD、MVE、ルールエンジン、収支計算 |
+| 表現の層 | 景観・素材・照明・雰囲気の可視化 | Blender、GPT-6、image2.5 等の画像・3D生成 |
+
+- 表現の層は正確性の層を**動かさない**。画像生成で得た形をそのまま建築的に
+  正しいものとして扱わない。
+- 画像は「構想案」、FreeCAD モデルは「寸法・法規を満たす設計データ」として
+  明確に区別する。
+- 最後に Fable やルールエンジンで細部を照合し、「きれいだが建築できない
+  イメージ」になることを防ぐ。
+
+## 3. AI とツールの役割分担（使用感に基づく）
+
+FreeCAD と Blender で比較した率直な使用感として、ひとつの AI に全部を任せる
+より、得意分野で分担するほうが強い、という判断です。
+
+| 担当 | 得意なこと |
+|---|---|
+| GPT-6 ＋ image2.5 | 空間全体の構想、形態、素材感、光、周辺環境を含む「雰囲気」の表現 |
+| Fable（Claude） | 寸法、納まり、部材関係など細部の正確さ |
+| FreeCAD | 寸法・法規・パラメータに基づく正確なモデル |
+| Blender | 質感、照明、街並み、プレゼンテーション表現 |
+
+※ 雰囲気の表現力は GPT-6＋image2.5 が圧倒的に優れる一方、細かい部分は
+間違いが多く、細部の正確さでは Fable が優位、という評価です。
+
+## 4. Presentation Twin（プレゼンテーション・ツイン）
+
+WorldSim の最終工程を仮に **Presentation Twin** と位置づけます。
+
+- シミュレーションされた再開発案を、投資家・地権者・行政・地域住民など
+  **相手に応じた**映像・画像・3D空間として提示する機能。
+- 同じ計画でも、次のような案を事業収支や建築ボリュームと連動させて比較できる
+  ようにする。
+  - ホテル中心案
+  - オフィス・商業複合案
+  - 住宅中心案
+  - 広場や緑地を重視した案
+  - 昼景・夜景・季節・人流の違い
+- ホテル案ならホテルらしい体験価値、住宅案なら暮らし方、再開発なら広場や
+  街路の空気感まで比較できることを目指す。
+
+## 5. 現在のリポジトリとの関係
+
+- 本リポジトリの MVE（`mve/`、`web/mve/`）は、正確性の層のうち「法規・建築の
+  シミュレーション」にあたります。
+- MVE の敷地モデル（`mve/site.py`、`examples/敷地入力テンプレート.yaml`）は、
+  SiteInfo の原型です。SiteInfo のテーブル設計はここから拡張します。
+- SiteInfo、PostGIS、Presentation Twin の実装はまだリポジトリにありません。
+
+## 6. 次に進める作業（SiteInfo 項目定義書を土台に）
+
+SiteInfo の入力要件は [`siteinfo_requirements.md`](siteinfo_requirements.md) にまとめてあります。
+
+1. SiteInfo のデータベース構造図 → [`siteinfo_db_design.md`](siteinfo_db_design.md)
+2. PostgreSQL／PostGIS のテーブル設計 → `db/siteinfo/schema.sql`
+3. Codex／Claude Code 向け実装指示書 → [`siteinfo_implementation_guide.md`](siteinfo_implementation_guide.md)、[`siteinfo_agent_prompts.md`](siteinfo_agent_prompts.md)
+4. SiteInfo 入力・確認画面の設計 → [`siteinfo_ui_design.md`](siteinfo_ui_design.md)
+
+項目定義書は [`siteinfo_field_definitions.md`](siteinfo_field_definitions.md)。
+
+文書の整理・統合（Obsidian と Codex／Claude Code／Gemini の連携）は
+[`knowledge_base.md`](knowledge_base.md)、索引は [`../INDEX.md`](../INDEX.md)。
+
+## 7. 進め方の約束
+
+- スマホからの利用時は内容確認と重要な設計判断を優先し、Excel 編集や Codex
+  での実装はノート／デスクトップ PC で進めやすい形にする。
+- 重要な設計判断は会話で詰め、成果物は PC で仕上げる。
