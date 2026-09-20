@@ -1,8 +1,11 @@
-# エージェント向けの案内（Codex / Claude Code 共通）
+# エージェント向けの案内（Codex / Claude Code / Gemini 共通）
 
 このリポジトリは SIM WORLD（WorldSim）のエンジン群です。現在は
 MVE（最大ボリューム計算、`mve/`、`web/mve/`）と、その前段の
 SiteInfo（敷地情報データベース、`db/siteinfo/`、`docs/worldsim/`）を扱っています。
+文書の索引は `docs/INDEX.md`、文書の整理・統合ルールは
+`docs/worldsim/knowledge_base.md`（リポジトリを Obsidian の vault として扱う）。
+`AGENTS.md`・`CLAUDE.md`・`GEMINI.md` は同じ内容で、どれか 1 つを直したら他も同じにする。
 
 ## SiteInfo を実装するときに読む順番
 
@@ -13,6 +16,7 @@ SiteInfo（敷地情報データベース、`db/siteinfo/`、`docs/worldsim/`）
 5. `docs/worldsim/siteinfo_implementation_guide.md` — 実装指示書（API、GeoJSON、取得元別アダプタ、マイルストーン）
 6. `docs/worldsim/siteinfo_ui_design.md` — 入力・確認画面
 7. `docs/worldsim/siteinfo_agent_prompts.md` — 依頼文のひな形
+8. `docs/worldsim/knowledge_base.md` — md の書き方と受信箱→正本の統合手順
 
 ## 守ること
 
@@ -24,6 +28,11 @@ SiteInfo（敷地情報データベース、`db/siteinfo/`、`docs/worldsim/`）
 - API キーなどの秘密情報はコードに書かない（環境変数）。
 - 既存の `mve/`、`web/`、`jwcad_volume/` は SiteInfo の作業で変更しない。
 - 1 マイルストーン 1 PR。受け入れ条件を満たしてから PR を作る。
+- 文書（md）を書くときは frontmatter（`summary` / `status` / `owner` / `updated`）を付け、
+  リンクは相対パスの Markdown リンクにする（`[[wikilink]]` は使わない）。
+- 依頼されていない文書の追加・提案は正本を直接書き換えず `docs/inbox/<tool>/` に置く。
+- `docs/` の md を増減・改名したら `python3 tools/build_docs_index.py` で
+  `docs/INDEX.md` を再生成し、リンク切れを 0 にする。
 
 ## 検証コマンド
 
@@ -31,6 +40,7 @@ SiteInfo（敷地情報データベース、`db/siteinfo/`、`docs/worldsim/`）
 pip install -e ".[dev]"      # 既存
 pytest                       # 既存＋SiteInfo（DB テストは SITEINFO_TEST_DSN があるときだけ）
 ruff check .                 # SiteInfo 追加後
+python3 tools/build_docs_index.py --check   # 文書索引とリンク切れ（pytest でも走る）
 # PostGIS があるとき
 psql -d siteinfo -v ON_ERROR_STOP=1 -f db/siteinfo/schema.sql
 psql -d siteinfo -v ON_ERROR_STOP=1 -f db/siteinfo/seed_catalog.sql

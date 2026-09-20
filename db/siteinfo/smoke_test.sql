@@ -154,7 +154,7 @@ begin
     select feature into f from v_site_geojson
     where site_id = '00000000-0000-0000-0000-000000000001';
     if f->'properties'->>'zone_id' <> 'commercial'
-       or (f->'properties'->>'far_percent')::int <> 500
+       or (f->'properties'->>'far_percent')::numeric <> 500
        or (f->'properties'->>'road_width_m')::numeric <> 12
        or f->'properties'->>'zone' <> '商業地域' then
         raise exception 'GeoJSON の properties が想定と違う: %', f->'properties';
@@ -171,6 +171,71 @@ begin
     select x, y into x0, y0 from site_points_plane('00000000-0000-0000-0000-000000000001') where seq = 0;
     if x0 is null or y0 is null then raise exception '平面座標が NULL'; end if;
     raise notice '平面座標 先頭点 = (%, %)', x0, y0;
+end $$;
+
+-- 用途地域が 2 つにまたがる敷地: 西 60% が商業(500/80)、東 40% が第一種住居(300/60)
+insert into site (site_id, site_name, geom, shape_source, plane_srid, created_by)
+values ('00000000-0000-0000-0000-000000000002', '分割検証',
+        ST_SetSRID(ST_Multi(ST_GeomFromText(
+            'POLYGON((139.7660 35.6810,139.7670 35.6810,139.7670 35.6812,139.7660 35.6812,139.7660 35.6810))')), 6668),
+        'polygon', 6677, 'smoke');
+insert into site_zone_part (site_id, part_seq, zone_type, geom, far_percent, bcr_percent, trace_source)
+values ('00000000-0000-0000-0000-000000000002', 0, 'commercial',
+        ST_SetSRID(ST_Multi(ST_GeomFromText(
+            'POLYGON((139.7660 35.6810,139.7666 35.6810,139.7666 35.6812,139.7660 35.6812,139.7660 35.6810))')), 6668),
+        500, 80, 'map_trace'),
+       ('00000000-0000-0000-0000-000000000002', 1, '1hres',
+        ST_SetSRID(ST_Multi(ST_GeomFromText(
+            'POLYGON((139.7666 35.6810,139.7670 35.6810,139.7670 35.6812,139.7666 35.6812,139.7666 35.6810))')), 6668),
+        300, 60, 'map_trace');
+do $$
+declare r record;
+begin
+    select * into r from site_zoning_from_parts('00000000-0000-0000-0000-000000000002');
+    raise notice '分割: 用途=% (%), 容積率=%, 建蔽率=%, 覆率=%',
+        r.zone_type, r.zone_share, r.far_percent, r.bcr_percent, r.coverage;
+    if r.zone_type <> 'commercial' then raise exception '過半の用途地域が違う: %', r.zone_type; end if;
+    if r.zone_share not between 0.59 and 0.61 then raise exception '過半の割合が想定外: %', r.zone_share; end if;
+    -- 0.6*500 + 0.4*300 = 420, 0.6*80 + 0.4*60 = 72
+    if r.far_percent not between 419 and 421 then raise exception '容積率の按分が想定外: %', r.far_percent; end if;
+    if r.bcr_percent not between 71.5 and 72.5 then raise exception '建蔽率の按分が想定外: %', r.bcr_percent; end if;
+    if r.coverage not between 0.99 and 1.01 then raise exception '覆率が想定外: %', r.coverage; end if;
+end $$;
+
+-- 分割ありなのに site_zoning が導出値と違う → 確定不可の理由に出ること
+insert into site_zoning (site_id, zone_type, zoning_split, far_percent, bcr_percent)
+values ('00000000-0000-0000-0000-000000000002', '1hres', true, 300, 60);
+do $$
+declare n int;
+begin
+    select count(*) into n from site_can_confirm('00000000-0000-0000-0000-000000000002')
+    where reason like '用途地域の分割と%';
+    if n <> 1 then raise exception '分割と敷地の値の不一致が検出されない'; end if;
+    raise notice '分割の不一致検出 OK';
+end $$;
+-- 導出値を反映すれば、その理由は消えること
+update site_zoning z
+   set zone_type = p.zone_type, far_percent = p.far_percent, bcr_percent = p.bcr_percent
+  from site_zoning_from_parts('00000000-0000-0000-0000-000000000002') p
+ where z.site_id = '00000000-0000-0000-0000-000000000002';
+do $$
+declare n int;
+begin
+    select count(*) into n from site_can_confirm('00000000-0000-0000-0000-000000000002')
+    where reason like '用途地域の分割%';
+    if n <> 0 then raise exception '導出値を反映したのに分割の理由が残る'; end if;
+    raise notice '分割の整合 OK';
+end $$;
+-- GeoJSON に分割情報が出ること
+do $$
+declare f jsonb;
+begin
+    select feature into f from v_site_geojson where site_id = '00000000-0000-0000-0000-000000000002';
+    if (f->'properties'->>'zoning_split')::boolean is not true
+       or jsonb_array_length(f->'properties'->'zone_parts') <> 2 then
+        raise exception 'GeoJSON の分割情報が想定外: %', f->'properties';
+    end if;
+    raise notice 'GeoJSON 分割情報 OK';
 end $$;
 
 rollback;

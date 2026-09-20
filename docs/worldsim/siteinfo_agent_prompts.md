@@ -1,4 +1,11 @@
-# SiteInfo 実装のエージェントへの渡し方（Codex／Claude Code）
+---
+summary: 実装指示書をエージェントに渡すときの依頼文のひな形（マイルストーン別）。
+status: stable
+owner: 大橋
+updated: 2026-09-18
+---
+
+# SiteInfo 実装のエージェントへの渡し方（Codex／Claude Code／Gemini）
 
 [`siteinfo_implementation_guide.md`](siteinfo_implementation_guide.md) を
 Codex と Claude Code のどちらにも同じように実装させるための手順と、

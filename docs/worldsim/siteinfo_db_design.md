@@ -1,3 +1,10 @@
+---
+summary: SiteInfo の ER 図とテーブル一覧、provenance・法令行・分割ポリゴンなどの設計判断、MVE へのマッピング。DDL は db/siteinfo/schema.sql が正。
+status: draft
+owner: 大橋
+updated: 2026-09-18
+---
+
 # SiteInfo データベース構造図・PostGIS テーブル設計 v0.2（草案）
 
 > [`siteinfo_field_definitions.md`](siteinfo_field_definitions.md)（項目定義書）を
@@ -30,6 +37,7 @@
 erDiagram
     site ||--o{ site_edge : "境界辺"
     site ||--o| site_zoning : "都市計画・形態規制"
+    site ||--o{ site_zone_part : "用途地域の分割"
     site ||--o| site_shadow_regulation : "日影規制"
     site ||--o{ site_legal_restriction : "法令上の制限"
     site ||--o| site_utility : "供給施設"
@@ -73,14 +81,24 @@ erDiagram
     site_zoning {
         uuid site_id PK
         text area_division
-        text zone_type FK
-        int far_percent
-        int bcr_percent
+        text zone_type FK "過半の用途地域"
+        boolean zoning_split
+        numeric far_percent "按分値は小数"
+        numeric bcr_percent
         text fire_zone
         text height_district
         text district_plan
         jsonb planned_road
         numeric absolute_height_limit_m
+    }
+    site_zone_part {
+        uuid site_id FK
+        int part_seq PK
+        text zone_type FK
+        geometry geom "MultiPolygon, 6668"
+        numeric far_percent
+        numeric bcr_percent
+        text trace_source
     }
     site_shadow_regulation {
         uuid site_id PK
@@ -146,6 +164,7 @@ erDiagram
 | `site` | 敷地の本体。所在、形状、面積、方位、確定状態 | 1, 2, 3 |
 | `site_edge` | 境界辺ごとの種別、道路幅員、道路種別、緩和対象 | 4 |
 | `site_zoning` | 都市計画法・建築基準法の指定値と形態規制フラグ | 5, 6 |
+| `site_zone_part` | 用途地域が 2 以上にまたがる場合の部分ごとのポリゴンと指定値 | 5.1 |
 | `site_shadow_regulation` | 日影規制の条例値 | 7 |
 | `site_legal_restriction` | 重要事項説明書の法令制限（法令ごとに 1 行） | 8 |
 | `site_utility` | 供給施設、既存建物の記録 | 9 |
@@ -190,7 +209,16 @@ where p.confirm_status is distinct from 'confirmed';
 採用値だけを渡します。`area_geom_m2` は `geom` からの生成列で、手で書き換え
 られません。
 
-### 4.4 座標系
+### 4.4 用途地域の分割を行で持つ理由
+
+敷地が 2 以上の用途地域にまたがる場合、部分ごとにポリゴンと指定値を持たないと
+面積按分ができません。`site_zone_part` に部分を行で持ち、
+`site_zone_part_areas()` が部分の面積と割合を、`site_zoning_from_parts()` が
+「過半の用途地域」「面積按分した容積率・建蔽率」「覆率」を返します。
+`site_zoning.zoning_split = true` の敷地は、この導出値と `site_zoning` の値が
+一致し、覆率が 1 ± 0.01 に収まるまで確定できません（`site_can_confirm()`）。
+
+### 4.5 座標系
 
 - `geom` は EPSG:6668（JGD2011 経緯度）。全国の敷地を 1 つの SRID で扱える。
 - `plane_srid` は敷地の位置から自動判定（系 I〜XIX）。MVE に渡す座標は
@@ -207,8 +235,9 @@ where p.confirm_status is distinct from 'confirmed';
 | `site.north_angle_deg` | `site.north_angle_deg` |
 | `site.wall_setback_m` | `site_edge.wall_setback_m`（全辺同値なら 1 つ） |
 | `site.edges[].kind` / `road_width_m` / `relaxation` | `site_edge` の各行 |
-| `zoning.zone_type` | `zone_type_catalog.mve_code` |
-| `zoning.far_ratio` / `coverage_ratio` | `site_zoning.far_percent` / `bcr_percent` |
+| `zoning.zone_type` | `zone_type_catalog.mve_code`（分割ありなら過半の用途地域） |
+| `zoning.far_ratio` / `coverage_ratio` | `site_zoning.far_percent` / `bcr_percent`（分割ありなら面積按分値） |
+| （将来）部分ごとの斜線・日影 | `site_zone_part` の部分ポリゴンと用途地域。MVE が部分ごとの適用に対応したら渡す |
 | `zoning.absolute_height_limit_m` | `site_zoning.absolute_height_limit_m` |
 | `shadow.measurement_height_m` | `site_shadow_regulation.measurement_height_m` |
 | `shadow.line_5m_max_hours` / `line_10m_max_hours` | `hours_5m` / `hours_10m` |
