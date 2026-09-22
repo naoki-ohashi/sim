@@ -7,6 +7,8 @@ updated: 2026-09-17
 
 # WorldSim 構想ノート（大橋の考え方）
 
+> WorldSim のフェーズ01である **URBAN SIM** の基本構想・システム基本設計は
+> [`urban_sim_concept_design.md`](urban_sim_concept_design.md) にまとめてある。
 > このファイルは、MVE の先にある **WorldSim** 構想について、オーナー（大橋）の
 > 考え方を記録したものです。今後の設計判断や Codex／Claude への実装指示は、
 > このノートの方針に沿って行います。内容は会話で詰めたものを整理したもので、
