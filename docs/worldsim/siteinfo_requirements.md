@@ -10,7 +10,7 @@ updated: 2026-09-17
 > SiteInfo の入力項目と入力方法について、オーナー（大橋）から指示された要件を
 > 記録したものです。SiteInfo 項目定義書、DB 設計、入力・確認画面設計、Codex
 > 向け実装指示書は、すべてこのノートを満たすように作ります。
-> 全体の考え方は [`vision.md`](vision.md) を参照。
+> 全体の考え方は [`urban_sim_concept_design.md`](urban_sim_concept_design.md) を参照。
 
 ## 1. 重要事項説明書の「法令上の制限」を必須入力項目にする
 

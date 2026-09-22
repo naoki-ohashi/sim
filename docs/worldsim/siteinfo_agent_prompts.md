@@ -34,7 +34,7 @@ Codex と Claude Code のどちらにも同じように実装させるための�
 docs/worldsim/siteinfo_implementation_guide.md の M1 を実装してください。
 
 先に次を順番に読んでください:
-1. docs/worldsim/vision.md
+1. docs/worldsim/urban_sim_concept_design.md
 2. docs/worldsim/siteinfo_requirements.md
 3. docs/worldsim/siteinfo_field_definitions.md
 4. docs/worldsim/siteinfo_db_design.md と db/siteinfo/schema.sql

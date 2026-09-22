@@ -20,8 +20,7 @@ status: generated
 | [SiteInfo 実装指示書 v0.2（Codex／Claude Code 共通）](worldsim/siteinfo_implementation_guide.md) | Codex／Claude Code／Gemini 向けの実装指示。API、GeoJSON 入出力、取得元ごとの自動入力アダプタ、マイルストーン M1〜M6。 | draft |
 | [SiteInfo 入力要件ノート（大橋の指示）](worldsim/siteinfo_requirements.md) | SiteInfo の入力要件 3 点。重要事項説明書の法令制限を必須にする、日影規制の時間を入力できる、GIS 自動入力は補助でユーザーが最終確認。 | stable |
 | [SiteInfo 入力・確認画面 設計書 v0.2（草案）](worldsim/siteinfo_ui_design.md) | SiteInfo の入力・確認画面。3 ステップ構成、項目行の標準、境界トレース UI、状態遷移、受け入れ条件。 | draft |
-| [URBAN SIM 基本構想書とシステム基本設計書](worldsim/urban_sim_concept_design.md) | URBAN SIM（WorldSim フェーズ01）の基本構想書とシステム基本設計書。人間とシステムの役割分担、HBUによる用途比較、システム構成、12の専門AI、データ基盤と根拠管理、MVPの範囲、技術候補、開発段階のロードマップをまとめる。 | draft |
-| [WorldSim 構想ノート（大橋の考え方）](worldsim/vision.md) | WorldSim 全体の考え方。正確性の層と表現の層を分ける原則、AI とツールの役割分担、Presentation Twin。 | stable |
+| [URBAN SIM 基本構想書とシステム基本設計書](worldsim/urban_sim_concept_design.md) | URBAN SIM（WorldSim フェーズ01）の基本構想書とシステム基本設計書。正確性の層と表現の層を分ける原則、AIとツールの役割分担、HBUによる用途比較、システム構成、12の専門AI、データ基盤と根拠管理、MVPの範囲、技術候補、開発段階のロードマップ、Presentation Twinをまとめる。 | draft |
 
 ## MVE（最大ボリューム計算）
 
@@ -58,4 +57,5 @@ status: generated
 | 文書 | 内容 | 状態 |
 |---|---|---|
 | [保管（docs/archive）](archive/README.md) | 統合済み・古い版の md の保管場所。参照はしない。 | stable |
+| [WorldSim 構想ノート（大橋の考え方）](archive/vision.md) | WorldSim 全体の考え方。正確性の層と表現の層を分ける原則、AI とツールの役割分担、Presentation Twin。 | archived |
 <!-- END GENERATED INDEX -->

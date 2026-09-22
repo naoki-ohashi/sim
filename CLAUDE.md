@@ -9,7 +9,7 @@ SiteInfo（敷地情報データベース、`db/siteinfo/`、`docs/worldsim/`）
 
 ## SiteInfo を実装するときに読む順番
 
-1. `docs/worldsim/vision.md` — 考え方（正確性の層と表現の層を分ける）
+1. `docs/worldsim/urban_sim_concept_design.md` — URBAN SIM（WorldSim フェーズ01）の基本構想とシステム基本設計（正確性の層と表現の層を分ける考え方を含む）
 2. `docs/worldsim/siteinfo_requirements.md` — 入力要件（自動入力は補助、確定はユーザー）
 3. `docs/worldsim/siteinfo_field_definitions.md` — 項目定義書
 4. `docs/worldsim/siteinfo_db_design.md` と `db/siteinfo/schema.sql` — DB 設計（スキーマが正）
