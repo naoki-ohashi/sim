@@ -6,6 +6,16 @@ build/
 dist/
 *.dxf
 .venv/
-# Obsidian: 共有するのは app.json だけ。個人の作業状態やキャッシュは除外
+# Obsidian: 共有するのは vault 設定と推奨プラグインの設定（data.json）だけ。
+# 個人の作業状態・キャッシュ・プラグイン本体（main.js など）は除外
 .obsidian/*
 !.obsidian/app.json
+!.obsidian/community-plugins.json
+!.obsidian/plugins/
+.obsidian/plugins/*
+!.obsidian/plugins/dataview/
+!.obsidian/plugins/obsidian-git/
+.obsidian/plugins/dataview/*
+.obsidian/plugins/obsidian-git/*
+!.obsidian/plugins/dataview/data.json
+!.obsidian/plugins/obsidian-git/data.json
