@@ -1,0 +1,15 @@
+{
+  "commitMessage": "docs: Obsidian から更新 {{date}}",
+  "autoCommitMessage": "docs: Obsidian から自動保存 {{date}}",
+  "commitDateFormat": "YYYY-MM-DD HH:mm",
+  "autoSaveInterval": 0,
+  "autoPushInterval": 0,
+  "autoPullInterval": 0,
+  "autoPullOnBoot": true,
+  "disablePush": false,
+  "pullBeforePush": true,
+  "syncMethod": "merge",
+  "listChangedFilesInMessageBody": true,
+  "showStatusBar": true,
+  "showBranchStatusBar": true
+}

@@ -51,6 +51,7 @@ status: generated
 | 文書 | 内容 | 状態 |
 |---|---|---|
 | [受信箱（docs/inbox）](inbox/README.md) | AI エージェントや ChatGPT が書いた未統合の md を置く場所。レビュー後に正本へ統合し、元ファイルは archive へ。 | stable |
+| [文書ダッシュボード（Dataview）](inbox/dashboard.md) | Obsidian の Dataview で受信箱・下書き・最近の更新・frontmatter 欠けを一覧するダッシュボード。 | stable |
 
 ## 保管（統合済み・古い版）
 

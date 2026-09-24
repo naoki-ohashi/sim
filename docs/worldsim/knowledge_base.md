@@ -2,7 +2,7 @@
 summary: リポジトリを Obsidian の vault として開き、Codex・Claude Code・Gemini・ChatGPT が書いた md を受信箱から正本へ統合する運用ルール。
 status: stable
 owner: 大橋
-updated: 2026-09-20
+updated: 2026-09-24
 ---
 
 # 文書の整理・統合ルール（Obsidian + AI エージェント）
@@ -85,10 +85,41 @@ flowchart LR
   `.gitignore` で除外。
 - 同期は Git で行う（Obsidian Sync は使わない）。スマホでは GitHub の md 表示で
   読み、編集は PC で行う。
-- 推奨プラグイン（任意）: Dataview（`status: inbox` の一覧を作る）、
-  Git（vault 内からコミット）。無くても運用できる。
 
-Dataview を使う場合、受信箱の一覧は次のクエリで出る。
+### 4.1 推奨プラグイン
+
+次の 2 つを推奨します。無くても運用できます。有効化の一覧
+（`.obsidian/community-plugins.json`）と各プラグインの設定
+（`.obsidian/plugins/<id>/data.json`）はコミットしてあり、プラグイン本体
+（`main.js` など）は `.gitignore` で除外しています。
+
+| プラグイン | id | 用途 | コミットしてある設定 |
+|---|---|---|---|
+| Dataview | `dataview` | frontmatter から受信箱・下書きの一覧を作る | DataviewJS は無効（クエリ言語だけ使う。vault 内の md から任意の JS を走らせない） |
+| Obsidian Git | `obsidian-git` | vault 内から pull・コミット・push する | 起動時に pull、push 前に pull、同期は merge、**自動コミット・自動 push は無効** |
+
+導入手順（初回だけ、PC ごと）:
+
+1. リポジトリを clone し、Obsidian で「フォルダを vault として開く」からリポジトリのルートを開く。
+2. 設定 → コミュニティプラグイン → 「制限モードをオフ」にする。
+3. 「閲覧」で `Dataview` と `Obsidian Git` を検索してインストールする。
+   一覧に登録済みなので、インストールすると有効になり、コミット済みの設定が使われる。
+4. Obsidian Git は PC の `git` と GitHub の認証（Git Credential Manager など）を使う。
+   コマンドラインで `git pull` が通る状態にしておく。
+
+使い方:
+
+- 受信箱の一覧は [`../inbox/dashboard.md`](../inbox/dashboard.md) を開く
+  （受信箱、14 日以上止まっているもの、下書きの正本、最近の更新、frontmatter 欠け）。
+- 正本の変更は PR で入れるので、Obsidian Git ではブランチを作ってから
+  コミット・push し、PR は GitHub で作る（コマンドパレット →
+  「Obsidian Git: Create new branch」）。`main` に直接 push しない。
+- md を増減・改名したら、PR の前に `python3 tools/build_docs_index.py` で索引を再生成する
+  （Obsidian からは実行できない。忘れても `pytest` で検出される）。
+- 設定を変えると `data.json` や `community-plugins.json` が書き換わり差分に出る。
+  全員に広めたい変更だけコミットし、個人の好みなら `git restore` で戻す。
+
+Dataview の受信箱クエリの基本形（ダッシュボードにも入っている）:
 
 ```dataview
 TABLE summary, updated FROM "docs/inbox" WHERE status = "inbox" SORT updated DESC

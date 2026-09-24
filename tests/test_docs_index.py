@@ -1,6 +1,7 @@
 """docs/ の索引・リンク切れ・エージェント案内ファイルの整合を検査する（ネットワーク不要）。"""
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -27,8 +28,27 @@ def test_docs_have_frontmatter_summary():
     """正本（worldsim）と受信箱・保管の案内は frontmatter に summary と status を持つ。"""
     for md in sorted((REPO / "docs" / "worldsim").glob("*.md")) + [
         REPO / "docs" / "inbox" / "README.md",
+        REPO / "docs" / "inbox" / "dashboard.md",
         REPO / "docs" / "archive" / "README.md",
     ]:
         head = md.read_text(encoding="utf-8").split("---\n", 2)
         assert len(head) == 3 and head[0] == "", md
         assert "summary:" in head[1] and "status:" in head[1], md
+
+
+def test_obsidian_recommended_plugins():
+    """推奨プラグインの一覧と設定がコミットされ、危険な設定になっていない。"""
+    obsidian = REPO / ".obsidian"
+    enabled = json.loads((obsidian / "community-plugins.json").read_text(encoding="utf-8"))
+    assert enabled == ["dataview", "obsidian-git"]
+    for plugin_id in enabled:
+        assert (obsidian / "plugins" / plugin_id / "data.json").is_file(), plugin_id
+
+    dataview = json.loads((obsidian / "plugins" / "dataview" / "data.json").read_text(encoding="utf-8"))
+    assert dataview["enableDataviewJs"] is False
+    assert dataview["enableInlineDataviewJs"] is False
+
+    git = json.loads((obsidian / "plugins" / "obsidian-git" / "data.json").read_text(encoding="utf-8"))
+    # 正本は PR で入れるので、自動コミット・自動 push はしない
+    assert git["autoSaveInterval"] == 0
+    assert git["autoPushInterval"] == 0
