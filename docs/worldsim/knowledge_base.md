@@ -2,7 +2,7 @@
 summary: リポジトリを Obsidian の vault として開き、Codex・Claude Code・Gemini・ChatGPT が書いた md を受信箱から正本へ統合する運用ルール。
 status: stable
 owner: 大橋
-updated: 2026-09-20
+updated: 2026-09-24
 ---
 
 # 文書の整理・統合ルール（Obsidian + AI エージェント）
@@ -77,6 +77,8 @@ flowchart LR
    同じ検査をする。
 
 ## 4. Obsidian の設定
+
+初めて使うときの手順は [Obsidian 連携の簡単な説明書](obsidian_guide.md) にまとめてある。
 
 - vault はリポジトリのルートを開く（`docs/` だけを開くと `AGENTS.md` や
   `db/siteinfo/schema.sql` へのリンクが切れる）。
