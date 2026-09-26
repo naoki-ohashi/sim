@@ -1,6 +1,6 @@
 # エージェント向けの案内（Codex / Claude Code / Gemini 共通）
 
-このリポジトリは SIM WORLD（WorldSim）のエンジン群です。現在は
+このリポジトリは WORLD SIM（WorldSim）のエンジン群です。現在は
 MVE（最大ボリューム計算、`mve/`、`web/mve/`）と、その前段の
 SiteInfo（敷地情報データベース、`db/siteinfo/`、`docs/worldsim/`）を扱っています。
 文書の索引は `docs/INDEX.md`、文書の整理・統合ルールは
