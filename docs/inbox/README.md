@@ -18,6 +18,9 @@ updated: 2026-09-24
 
 ## ひな形
 
+Obsidian ではテンプレート [`受信箱メモ`](../../templates/受信箱メモ.md) で挿入できる
+（設定は [`../worldsim/knowledge_base.md`](../worldsim/knowledge_base.md) の §4.1）。
+
 ```markdown
 ---
 summary: 1 行の要約

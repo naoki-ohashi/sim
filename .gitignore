@@ -11,6 +11,7 @@ dist/
 .obsidian/*
 !.obsidian/app.json
 !.obsidian/community-plugins.json
+!.obsidian/templates.json
 !.obsidian/plugins/
 .obsidian/plugins/*
 !.obsidian/plugins/dataview/

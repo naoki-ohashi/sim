@@ -52,3 +52,17 @@ def test_obsidian_recommended_plugins():
     # 正本は PR で入れるので、自動コミット・自動 push はしない
     assert git["autoSaveInterval"] == 0
     assert git["autoPushInterval"] == 0
+
+
+def test_obsidian_templates():
+    """テンプレートのフォルダ設定と、受信箱・正本・保管のひな形が揃っている。"""
+    settings = json.loads((REPO / ".obsidian" / "templates.json").read_text(encoding="utf-8"))
+    folder = REPO / settings["folder"]
+    assert folder.is_dir()
+    expected_status = {"受信箱メモ.md": "inbox", "正本.md": "draft", "統合済み.md": "archived"}
+    for name, status in expected_status.items():
+        head = (folder / name).read_text(encoding="utf-8").split("---\n", 2)
+        assert len(head) == 3 and head[0] == "", name
+        assert f"status: {status}\n" in head[1], name
+        assert "updated: {{date:YYYY-MM-DD}}" in head[1], name
+    assert (folder / "未決・決定.md").is_file()
