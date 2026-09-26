@@ -8,7 +8,7 @@ updated: 2026-09-18
 # SiteInfo 項目定義書 v0.2（草案）
 
 > WorldSim の出発点となる **敷地情報（SiteInfo）** の入力項目を定義します。
-> 前提は [`vision.md`](vision.md)（考え方）と
+> 前提は [`urban_sim_concept_design.md`](urban_sim_concept_design.md)（考え方）と
 > [`siteinfo_requirements.md`](siteinfo_requirements.md)（入力要件）です。
 > DB 設計は [`siteinfo_db_design.md`](siteinfo_db_design.md)、DDL は
 > [`../../db/siteinfo/schema.sql`](../../db/siteinfo/schema.sql) を参照。

@@ -1,11 +1,18 @@
 ---
 summary: WorldSim 全体の考え方。正確性の層と表現の層を分ける原則、AI とツールの役割分担、Presentation Twin。
-status: stable
+status: archived
 owner: 大橋
-updated: 2026-09-17
+updated: 2026-09-22
 ---
 
+→ 統合先: [`../worldsim/urban_sim_concept_design.md`](../worldsim/urban_sim_concept_design.md)
+
 # WorldSim 構想ノート（大橋の考え方）
+
+> このファイルは統合済みです。内容は [`urban_sim_concept_design.md`](../worldsim/urban_sim_concept_design.md)
+> （「全体を貫く原則」「正確性の層と表現の層を分ける」「第9章 技術構成と共同開発」
+> 「第11章 将来の可視化と次の設計」）へ移した。設計判断の根拠として引くときは
+> 統合先を引くこと。以下は統合前の原文（参照のみ、更新しない）。
 
 > このファイルは、MVE の先にある **WorldSim** 構想について、オーナー（大橋）の
 > 考え方を記録したものです。今後の設計判断や Codex／Claude への実装指示は、
@@ -83,17 +90,17 @@ WorldSim の最終工程を仮に **Presentation Twin** と位置づけます。
 
 ## 6. 次に進める作業（SiteInfo 項目定義書を土台に）
 
-SiteInfo の入力要件は [`siteinfo_requirements.md`](siteinfo_requirements.md) にまとめてあります。
+SiteInfo の入力要件は [`siteinfo_requirements.md`](../worldsim/siteinfo_requirements.md) にまとめてあります。
 
-1. SiteInfo のデータベース構造図 → [`siteinfo_db_design.md`](siteinfo_db_design.md)
+1. SiteInfo のデータベース構造図 → [`siteinfo_db_design.md`](../worldsim/siteinfo_db_design.md)
 2. PostgreSQL／PostGIS のテーブル設計 → `db/siteinfo/schema.sql`
-3. Codex／Claude Code 向け実装指示書 → [`siteinfo_implementation_guide.md`](siteinfo_implementation_guide.md)、[`siteinfo_agent_prompts.md`](siteinfo_agent_prompts.md)
-4. SiteInfo 入力・確認画面の設計 → [`siteinfo_ui_design.md`](siteinfo_ui_design.md)
+3. Codex／Claude Code 向け実装指示書 → [`siteinfo_implementation_guide.md`](../worldsim/siteinfo_implementation_guide.md)、[`siteinfo_agent_prompts.md`](../worldsim/siteinfo_agent_prompts.md)
+4. SiteInfo 入力・確認画面の設計 → [`siteinfo_ui_design.md`](../worldsim/siteinfo_ui_design.md)
 
-項目定義書は [`siteinfo_field_definitions.md`](siteinfo_field_definitions.md)。
+項目定義書は [`siteinfo_field_definitions.md`](../worldsim/siteinfo_field_definitions.md)。
 
 文書の整理・統合（Obsidian と Codex／Claude Code／Gemini の連携）は
-[`knowledge_base.md`](knowledge_base.md)、索引は [`../INDEX.md`](../INDEX.md)。
+[`knowledge_base.md`](../worldsim/knowledge_base.md)、索引は [`../INDEX.md`](../INDEX.md)。
 
 ## 7. 進め方の約束
 
