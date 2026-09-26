@@ -78,6 +78,8 @@ flowchart LR
 
 ## 4. Obsidian の設定
 
+初めて使うときの手順は [Obsidian 連携の簡単な説明書](obsidian_guide.md) にまとめてある。
+
 - vault はリポジトリのルートを開く（`docs/` だけを開くと `AGENTS.md` や
   `db/siteinfo/schema.sql` へのリンクが切れる）。
 - `.obsidian/app.json` はコミットしてある（Markdown リンク、相対パス、

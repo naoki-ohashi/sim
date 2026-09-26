@@ -14,6 +14,7 @@ status: generated
 | 文書 | 内容 | 状態 |
 |---|---|---|
 | [文書の整理・統合ルール（Obsidian + AI エージェント）](worldsim/knowledge_base.md) | リポジトリを Obsidian の vault として開き、Codex・Claude Code・Gemini・ChatGPT が書いた md を受信箱から正本へ統合する運用ルール。 | stable |
+| [Obsidian 連携の簡単な説明書](worldsim/obsidian_guide.md) | リポジトリを Obsidian で開いて md を読む・書く・受信箱を片付けるまでの手順を短くまとめた説明書。運用ルールの本体は knowledge_base.md。 | stable |
 | [SiteInfo 実装のエージェントへの渡し方（Codex／Claude Code／Gemini）](worldsim/siteinfo_agent_prompts.md) | 実装指示書をエージェントに渡すときの依頼文のひな形（マイルストーン別）。 | stable |
 | [SiteInfo データベース構造図・PostGIS テーブル設計 v0.2（草案）](worldsim/siteinfo_db_design.md) | SiteInfo の ER 図とテーブル一覧、provenance・法令行・分割ポリゴンなどの設計判断、MVE へのマッピング。DDL は db/siteinfo/schema.sql が正。 | draft |
 | [SiteInfo 項目定義書 v0.2（草案）](worldsim/siteinfo_field_definitions.md) | SiteInfo の入力項目（グループ A〜K）、メタ属性、用途地域が 2 以上にまたがる場合の按分ルール、確定条件。 | draft |
